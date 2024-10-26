@@ -1,0 +1,52 @@
+xgboost_test.py log:
+
+Series([], dtype: int64)
+C:\Users\jasem\AppData\Local\Programs\Python\Python310\lib\site-packages\numpy\ma\core.py:2820: RuntimeWarning: invalid value encountered in cast
+  _data = np.array(data, dtype=dtype, copy=copy,
+Best parameters: {'colsample_bytree': 1.0, 'learning_rate': 0.1, 'max_depth': 3, 'min_child_weight': 3, 'n_estimators': 900, 'subsample': 0.8}
+XGBOOST RMSE (45,042)
+Mean R² across folds: 0.9431411761835152
+                             Feature    Importance
+42                   year_updated_at  9.716060e-01
+38                   year_created_at  1.003361e-02
+44                    day_updated_at  8.891784e-03
+34                conclusion_skipped  1.699883e-03
+2                       total_builds  1.573872e-03
+40                    day_created_at  1.522424e-03
+43                  month_updated_at  1.462921e-03
+33                conclusion_failure  1.384346e-03
+15                           gh_sloc  9.821950e-04
+39                  month_created_at  1.461981e-04
+26            gh_test_lines_per_kloc  1.307280e-04
+21                        total_jobs  1.241342e-04
+5                  gh_files_modified  5.400698e-05
+55                             Other  4.189193e-05
+12                      gh_src_churn  3.447526e-05
+23       gh_commits_on_files_touched  3.176233e-05
+13                gh_pull_req_number  2.804278e-05
+48    day_gh_first_commit_created_at  2.774595e-05
+7                     gh_lines_added  2.283195e-05
+41                   hour_created_at  2.180508e-05
+45                   hour_updated_at  1.948408e-05
+22         gh_team_size_last_3_month  1.656871e-05
+4                   gh_files_deleted  1.488845e-05
+9                     gh_tests_added  1.275885e-05
+47  month_gh_first_commit_created_at  1.260443e-05
+8                   gh_lines_deleted  1.114256e-05
+19                    gh_other_files  1.092311e-05
+20                git_num_committers  9.728028e-06
+53                          Document  8.762830e-06
+
+
+
+------------------------------------------------------------------------------------------------------------------------
+
+knn_test.py log:
+
+
+Series([], dtype: int64)
+Best parameters: {'metric': 'manhattan', 'n_neighbors': 3, 'weights': 'uniform'}
+Best cross-validation score (negative MSE): -609189288555.1259
+KNN RMSE (42,892)
+Mean R² across folds: 0.8904059362570805
+PS C:\Users\jasem\Desktop\yacin-code>
