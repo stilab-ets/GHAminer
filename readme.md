@@ -1,3 +1,8 @@
+# GitHub Data Collection Tool Architecture
+The architecture represents an automated system for collecting data from GitHub projects, using the GitHub API. The 'GitHub Project Fetcher' component queries the API to extract projects based on specific criteria and stores the results in a CSV file named Projects.csv. Then, the 'Projects Data Collector' processes each listed project to retrieve more detailed data and calculate metrics such as the number of lines of code added, the number of test lines per thousand lines of code, the total source code lines, and whether tests were run. These metrics are then recorded in a CSV file dataset.csv, used for further analysis or training machine learning models. This process allows for an in-depth and automated analysis of development practices and the quality of projects on GitHub
+
+![l'architecture de l'outil](https://github.com/user-attachments/assets/39001f2b-e0e5-46a4-9261-73bf73c4532d)
+
 # Code Package: Predicting Build Durations Using GitHub Data
 
 ## Overview
