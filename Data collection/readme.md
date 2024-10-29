@@ -1,4 +1,4 @@
-# Command Line Usage
+# Command Line 
 This section explains how to use the script via the command line. The script supports several options that allow you to customize its behavior.
 
  **Prerequisites**
