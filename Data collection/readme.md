@@ -40,6 +40,8 @@ Here's how you might run the script with all the options provided:
 python script_name.py --token YOUR_GITHUB_TOKEN --projects path/to/projects.csv --from_date 20224-01-01 --to_date 2024-10-10
 ```
 ### Notes
-It's important to replace YOUR_GITHUB_TOKEN with your actual GitHub token.
-Adjust the paths to the project CSV file and dates according to your requirements.
-Ensure you have the necessary Python packages installed (e.g., requests, pydriller).
+* It's important to replace YOUR_GITHUB_TOKEN with your actual GitHub token.
+  
+* Adjust the paths to the project CSV file and dates according to your requirements.
+  
+* Ensure you have the necessary Python packages installed (e.g., requests, pydriller).
