@@ -14,7 +14,7 @@ import argparse
 import zipfile
 import io
 
-github_token = 'your_github_token'
+github_token = 'you_token'
 output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
@@ -41,6 +41,11 @@ class LRUCache:
             # Remove the first item (least recently used)
             self.cache.popitem(last=False)
         self.cache[key] = value
+
+    def delete(self, key):
+        # Add this method to allow deletion of specific keys
+        if key in self.cache:
+            del self.cache[key]
 
 # Setup logging to both file and console
 logging.basicConfig(filename='app.log6', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -672,7 +677,6 @@ def summarize_test_results(test_results):
 
 # end new functions
 
-
 def get_builds_info(repo_full_name, token, output_csv):
     languages = get_repository_languages(repo_full_name, token)
     build_workflow_ids = get_workflow_ids(repo_full_name, token)
@@ -684,6 +688,9 @@ def get_builds_info(repo_full_name, token, output_csv):
     unique_builds = set()
     commit_cache = LRUCache(capacity=10000)
     last_end_date = None  # Initialize to track end date of each build
+
+    # Initialize a set to track unique contributors up to each commit
+    unique_contributors = set()
 
     if not build_workflow_ids:
         logging.error("No build workflows found.")
@@ -704,14 +711,26 @@ def get_builds_info(repo_full_name, token, output_csv):
                         continue
                     unique_builds.add(run_id)
 
-                    commit_sha = run['head_sha']
-                    commit_data = get_commit_data(commit_sha, repo_full_name, last_end_date, token, sloc, test, commit_cache)
-                    if commit_data.get('gh_sloc', 0) == 0:
-                        logging.info(f"Skipping commit {commit_sha} with 0 SLOC")
-                        continue
+                    start_time = time.time()
 
-                    build_info = compile_build_info(run, repo_full_name, commit_data, commit_sha, languages,
-                                                    number_of_committers, gh_team_size, build_language, test_framework)
+                    commit_sha = run['head_sha']
+                    until_date = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
+                    # Pass the unique_contributors set to be updated within get_commit_data
+                    commit_data = get_commit_data(commit_sha, repo_full_name, until_date, last_end_date, token, sloc, test, commit_cache, unique_contributors)
+                    #if commit_data.get('gh_sloc', 0) == 0:
+                        #logging.info(f"Skipping commit {commit_sha} with 0 SLOC")
+                        #continue
+
+                    
+
+                    # Compile the build info, using the length of unique_contributors here
+                    build_info = compile_build_info(
+                        run, repo_full_name, commit_data, commit_sha, languages,
+                        len(unique_contributors),  # Pass the final unique contributor count here
+                        gh_team_size, build_language, test_framework
+                    )
+                    duration_to_fetch = time.time() - start_time
+                    build_info['fetch_duration'] = duration_to_fetch  # Add the duration as a new field
                     builds_info.clear()
                     builds_info.append(build_info)
                     save_builds_to_file(builds_info, output_csv)
@@ -726,8 +745,11 @@ def get_builds_info(repo_full_name, token, output_csv):
             else:
                 break
 
+    # Reset unique contributors after processing each repository
+    unique_contributors.clear()
 
-def get_commit_data(commit_sha, repo_full_name, last_end_date, token, sloc, test, commit_cache):
+
+def get_commit_data(commit_sha, repo_full_name, until_date, last_end_date, token, sloc, test, commit_cache, unique_contributors):
     # Initialize metrics
     total_added = total_removed = tests_added = tests_removed = 0
     test_additions = test_deletions = prod_additions = prod_deletions = 0
@@ -735,22 +757,216 @@ def get_commit_data(commit_sha, repo_full_name, last_end_date, token, sloc, test
     file_types = set()
     commits_on_files_touched = set()
 
-    # Check cache for commit data to avoid redundant calculations
-    if commit_cache.get(commit_sha):
-        return commit_cache.get(commit_sha)
+    headers = {'Authorization': f'token {token}'}
+    url = f"https://api.github.com/repos/{repo_full_name}/commits"
 
+    # Check and process the initiating commit if not in cache
+    cached_data = commit_cache.get(commit_sha)
+    if cached_data:
+        # Ensure the cached data has all expected keys
+        if all(key in cached_data for key in ['total_added', 'total_removed', 'tests_added', 'tests_removed']):
+            # Use cached data if it's complete
+            total_added += cached_data['total_added']
+            total_removed += cached_data['total_removed']
+            tests_added += cached_data['tests_added']
+            tests_removed += cached_data['tests_removed']
+            src_files += cached_data['src_files']
+            doc_files += cached_data['doc_files']
+            other_files += cached_data['other_files']
+            file_types.update(cached_data['file_types'])
+            commits_on_files_touched.add(commit_sha)
+        else:
+            # If cached data is incomplete, remove it and proceed to re-fetch
+            commit_cache.delete(commit_sha)
+            cached_data = None
+
+    if not cached_data:
+        # Fetch and cache the initiating commit data
+        commit_full_data = fetch_full_commit_data(commit_sha, repo_full_name, token, unique_contributors)
+        if commit_full_data:
+            commits_on_files_touched.add(commit_sha)
+            total_added += commit_full_data['total_added']
+            total_removed += commit_full_data['total_removed']
+            tests_added += commit_full_data['tests_added']
+            tests_removed += commit_full_data['tests_removed']
+            src_files += commit_full_data['src_files']
+            doc_files += commit_full_data['doc_files']
+            other_files += commit_full_data['other_files']
+            file_types.update(commit_full_data['file_types'])
+
+            # Cache the initiating commit data only if it's complete
+            commit_cache.put(commit_sha, commit_full_data)
+
+    # Determine the commit date range
+    if last_end_date is None:
+        # First build: limit to 100 most recent commits
+        params = {'until': until_date.isoformat() + 'Z', 'per_page': 100}
+    else:
+        # Subsequent builds: get commits from until_date back to last_end_date
+        print("until build date of now  : ", until_date.isoformat() + 'Z')
+        print("last build date :  ", last_end_date.isoformat() + 'Z')
+        params = {
+            'until': until_date.isoformat() + 'Z',
+            'since': last_end_date.isoformat() + 'Z',
+            'per_page': 100
+        }
+
+    counter = 0  # Initialize counter outside the loop to track total commits
+    # Loop through paginated responses to fetch all commits within the date range
+    while True:
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code != 200:
+            logging.error(f"Error fetching commit details for {repo_full_name}: {response.status_code}")
+            break
+
+        commits = response.json()
+        if not commits:
+            break
+
+        for commit in commits:
+            if counter >= 100 and last_end_date is None:
+                # For the first build, limit to 100 commits
+                break
+
+            commit_sha = commit.get('sha')
+            commit_date = commit.get('commit', {}).get('committer', {}).get('date')
+            if not commit_date:
+                continue
+
+            # Convert commit_date to datetime for comparison
+            commit_date = datetime.strptime(commit_date, '%Y-%m-%dT%H:%M:%SZ')
+
+            # Stop fetching if we reach a commit date outside the range for non-first builds
+            if last_end_date and commit_date < last_end_date:
+                return compile_final_data(
+                    total_added, total_removed, tests_added, tests_removed,
+                    src_files, doc_files, other_files, unique_files_added,
+                    unique_files_deleted, unique_files_modified, file_types,
+                    commits_on_files_touched, unique_contributors, commit_cache, commit_sha
+                )
+
+            # Check cache to avoid redundant calls
+            cached_data = commit_cache.get(commit_sha)
+            if cached_data:
+                # Ensure the cached data has all expected keys
+                if all(key in cached_data for key in ['total_added', 'total_removed', 'tests_added', 'tests_removed']):
+                    # Use cached data if it's complete
+                    total_added += cached_data['total_added']
+                    total_removed += cached_data['total_removed']
+                    tests_added += cached_data['tests_added']
+                    tests_removed += cached_data['tests_removed']
+                    src_files += cached_data['src_files']
+                    doc_files += cached_data['doc_files']
+                    other_files += cached_data['other_files']
+                    file_types.update(cached_data['file_types'])
+                    commits_on_files_touched.add(commit_sha)
+                    continue
+                else:
+                    # If cached data is incomplete, remove it and proceed to re-fetch
+                    commit_cache.delete(commit_sha)
+                    cached_data = None
+
+            # Fetch full details for each commit to gather contributors and metrics
+            counter += 1
+            print("fetching current commit sha:", commit_sha, "counter is:", counter)
+            
+            commit_full_data = fetch_full_commit_data(commit_sha, repo_full_name, token, unique_contributors)
+            if commit_full_data:
+                commits_on_files_touched.add(commit_sha)
+                total_added += commit_full_data['total_added']
+                total_removed += commit_full_data['total_removed']
+                tests_added += commit_full_data['tests_added']
+                tests_removed += commit_full_data['tests_removed']
+                src_files += commit_full_data['src_files']
+                doc_files += commit_full_data['doc_files']
+                other_files += commit_full_data['other_files']
+                file_types.update(commit_full_data['file_types'])
+
+            # Cache the fetched commit data only if it's complete
+            if commit_full_data and all(key in commit_full_data for key in ['total_added', 'total_removed', 'tests_added', 'tests_removed']):
+                commit_cache.put(commit_sha, commit_full_data)
+
+        # Break out of the while loop if 100 commits have been fetched for the first build
+        if counter >= 100 and last_end_date is None:
+            break
+
+        # Pagination: move to the next page
+        params['page'] = params.get('page', 1) + 1
+
+    # Compile and return the final data for commits up to `last_end_date`
+    return compile_final_data(
+        total_added, total_removed, tests_added, tests_removed,
+        src_files, doc_files, other_files, unique_files_added,
+        unique_files_deleted, unique_files_modified, file_types,
+        commits_on_files_touched, unique_contributors, commit_cache, commit_sha
+    )
+
+
+
+
+
+
+def compile_final_data(
+    total_added, total_removed, tests_added, tests_removed,
+    src_files, doc_files, other_files, unique_files_added,
+    unique_files_deleted, unique_files_modified, file_types,
+    commits_on_files_touched, unique_contributors, commit_cache, commit_sha
+):
+    # Calculate test lines per KLOC
+    tests_per_kloc = (tests_added / (total_added + tests_added) * 1000) if (total_added + tests_added) > 0 else 0
+
+    # Prepare the aggregated data for all processed commits
+    final_data = {
+        'gh_sloc': total_added + tests_added,
+        'gh_test_lines_per_kloc': tests_per_kloc,
+        'gh_files_added': unique_files_added,
+        'gh_files_deleted': unique_files_deleted,
+        'gh_files_modified': unique_files_modified,
+        'gh_src_files': src_files,
+        'gh_doc_files': doc_files,
+        'gh_other_files': other_files,
+        'gh_lines_added': total_added,
+        'gh_lines_deleted': total_removed,
+        'file_types': ', '.join(file_types),
+        'gh_tests_added': tests_added,
+        'gh_tests_deleted': tests_removed,
+        'gh_test_churn': tests_added + tests_removed,
+        'gh_src_churn': total_added + total_removed,
+        'gh_commits_on_files_touched': len(commits_on_files_touched),
+        'git_num_committers': len(unique_contributors)
+    }
+
+    # Cache the final data for this commit set
+    commit_cache.put(commit_sha, final_data)
+    return final_data
+
+
+
+def fetch_full_commit_data(commit_sha, repo_full_name, token, unique_contributors):
+    """Fetch detailed commit data including contributors, additions, and deletions."""
     headers = {'Authorization': f'token {token}'}
     url = f"https://api.github.com/repos/{repo_full_name}/commits/{commit_sha}"
+
+    
 
     try:
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             logging.error(f"Error fetching commit details for {commit_sha}: {response.status_code}")
-            return {}  # Early return on error
+            return {}
 
         commit_data = response.json()
         files = commit_data.get('files', [])
-        
+        total_added = total_removed = tests_added = tests_removed = 0
+        src_files = doc_files = other_files = 0
+        file_types = set()
+
+        # Update unique contributors based on the author of this commit
+        author = commit_data.get('author')
+        if author and author.get('login'):
+            unique_contributors.add(author['login'])
+
         for file in files:
             filename = file.get('filename', '')
             additions = file.get('additions', 0)
@@ -762,64 +978,31 @@ def get_commit_data(commit_sha, repo_full_name, last_end_date, token, sloc, test
                 tests_added += additions
                 tests_removed += deletions
             elif is_production_file(filename):
-                prod_additions += additions
-                prod_deletions += deletions
+                total_added += additions
+                total_removed += deletions
                 src_files += 1
             elif is_documentation_file(filename):
                 doc_files += 1
             else:
                 other_files += 1
 
-            # Track file types and changes
+            # Track unique file types
             file_types.add(os.path.splitext(filename)[1])
-            if change_type == "added":
-                unique_files_added += 1
-            elif change_type == "deleted":
-                unique_files_deleted += 1
-            elif change_type == "modified":
-                unique_files_modified += 1
 
-            # Track unique commits affecting files
-            commits_on_files_touched.add(commit_sha)
-
-        # Calculate LOC for the current commit using calculate_total_loc
-        loc_added, loc_removed, test_loc_added, test_loc_removed = calculate_total_loc(commit_data, commit_cache)
-        total_added += loc_added
-        total_removed += loc_removed
-        tests_added += test_loc_added
-        tests_removed += test_loc_removed
+        return {
+            'total_added': total_added,
+            'total_removed': total_removed,
+            'tests_added': tests_added,
+            'tests_removed': tests_removed,
+            'src_files': src_files,
+            'doc_files': doc_files,
+            'other_files': other_files,
+            'file_types': file_types,
+        }
 
     except Exception as e:
-        logging.error(f"Error in get_commit_data: {e}")
+        logging.error(f"Error in fetch_full_commit_data: {e}")
         return {}
-
-    # Calculate test lines per KLOC
-    tests_per_kloc = (tests_added / (total_added + tests_added) * 1000) if (total_added + tests_added) > 0 else 0
-
-    # Prepare and cache final results
-    final_data = {
-        'gh_sloc': total_added + tests_added,
-        'gh_test_lines_per_kloc': tests_per_kloc,
-        'gh_files_added': unique_files_added,
-        'gh_files_deleted': unique_files_deleted,
-        'gh_files_modified': unique_files_modified,
-        'gh_src_files': src_files,
-        'gh_doc_files': doc_files,
-        'gh_other_files': other_files,
-        'gh_lines_added': prod_additions,
-        'gh_lines_deleted': prod_deletions,
-        'file_types': ', '.join(file_types),
-        'gh_tests_added': tests_added,
-        'gh_tests_deleted': tests_removed,
-        'gh_test_churn': tests_added + tests_removed,
-        'gh_src_churn': prod_additions + prod_deletions,
-        'gh_commits_on_files_touched': len(commits_on_files_touched),
-    }
-
-    # Cache and return final aggregated data for the commit
-    commit_cache.put(commit_sha, final_data)
-    return final_data
-
 
 
 
@@ -1010,13 +1193,15 @@ def save_builds_to_file(builds_info, output_csv):
         'gh_description_complexity', 'gh_src_files', 'gh_doc_files', 'gh_other_files', 'git_num_committers',
         'gh_job_id', 'total_jobs', 'gh_first_commit_created_at', 'gh_team_size_last_3_month',
         'gh_commits_on_files_touched', 'gh_num_pr_comments', 'git_merged_with', 'gh_test_lines_per_kloc',
-        'build_language', 'test_framework', 'tests_passed', 'tests_failed', 'tests_skipped', 'tests_total'
+        'build_language', 'test_framework', 'tests_passed', 'tests_failed', 'tests_skipped', 'tests_total',
+        'fetch_duration'  # New field for fetch duration
     ]
     with open(output_csv, mode='a', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         for build in builds_info:
             writer.writerow(build)
     logging.info(f"Build information saved to {output_csv}")
+
 
 
 def save_head(output_csv):
@@ -1029,12 +1214,14 @@ def save_head(output_csv):
         'gh_description_complexity', 'gh_src_files', 'gh_doc_files', 'gh_other_files', 'git_num_committers',
         'gh_job_id', 'total_jobs', 'gh_first_commit_created_at', 'gh_team_size_last_3_month',
         'gh_commits_on_files_touched', 'gh_num_pr_comments', 'git_merged_with', 'gh_test_lines_per_kloc',
-        'build_language', 'test_framework', 'tests_passed', 'tests_failed', 'tests_skipped', 'tests_total'
+        'build_language', 'test_framework', 'tests_passed', 'tests_failed', 'tests_skipped', 'tests_total',
+        'fetch_duration'  # New field for fetch duration
     ]
     with open(output_csv, mode='a', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
-    logging.info(f"Build information saved to {output_csv}")
+    logging.info(f"CSV header with fetch duration saved to {output_csv}")
+
 
 
 def main():
