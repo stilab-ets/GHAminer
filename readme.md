@@ -89,7 +89,27 @@ cd GHBminer
 
 ## Usage:
 
+GHBminer is a standalone Python script that can be executed from the command line on any operating system with Python 3.x installed. 
 
+To run GHBminer, use the following command along with the specified parameters:
+
+```bash
+python GHBMetrics.py <parameters>
+```
+#### Parameters:
+
+`-t, --token` : GitHub personal access token for API access.
+`-p, --projects` : CSV file path containing the list of repositories to analyze.
+`-s, --single-project` : (Optional) GitHub repository URL for analyzing a single project without using a CSV file.
+`-fd` : Start date for the date range of builds to retrieve.
+`-td` : End date for the date range of builds to retrieve.
+
+#### Example Usage:
+To analyze repositories from a CSV file and save the results:
+python GHBMetrics.py -t <Your_GitHub_Token> -p /path/to/repositories.csv -fd 2023-01-01 -td 2023-12-31
+
+To analyze a single repository:
+python GHBMetrics.py -t <Your_GitHub_Token> -s <GitHub_Repository_URL> -fd 2023-01-01 -td 2023-12-31
 
 
 
