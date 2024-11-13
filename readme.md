@@ -99,9 +99,13 @@ python GHBMetrics.py <parameters>
 #### Parameters:
 
 `-t, --token` : GitHub personal access token for API access.
+
 `-p, --projects` : CSV file path containing the list of repositories to analyze.
+
 `-s, --single-project` : (Optional) GitHub repository URL for analyzing a single project without using a CSV file.
+
 `-fd` : Start date for the date range of builds to retrieve.
+
 `-td` : End date for the date range of builds to retrieve.
 
 #### Example Usage:
@@ -116,8 +120,6 @@ python GHBMetrics.py -t <Your_GitHub_Token> -s <GitHub_Repository_URL> -fd 2023-
 
 
 ## Output:
-### Output
-
 GHBminer generates a CSV file, where each row contains metrics for a unique build. Below is an example row to illustrate the output format:
 ```bash
 | Metric                       | Value                                  |
