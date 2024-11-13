@@ -4,11 +4,7 @@
 
 
 ## Metrics:
-
-
-## Metrics
-
-The following table provides a comprehensive list of the metrics collected by the tool:
+The following table provides the list of the 45 metrics collected by GHBMiner:
 
 | Metric Name                | Description                                                                                                 | Unit / Example          |
 |----------------------------|-------------------------------------------------------------------------------------------------------------|--------------------------|
@@ -83,14 +79,25 @@ The following table provides a comprehensive list of the metrics collected by th
 
 
 ## Contributing
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Your contributions are genuinely valued and greatly appreciated.
+
+If you have ideas or improvements to enhance the project, we encourage you to fork the repository and initiate a pull request. Alternatively, feel free to open an issue labeled "enhancement" to share your suggestions. Don't forget to show your support by starring the project! Thank you once again for being a part of this collaborative journey.
+
+Here's a step-by-step guide to guide you through the contribution process:
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request for review
 
 
 ## License:
-
+Distributed under the MIT License. See `LICENSE.md` for more information.
 
 
 ## Contact:
-
+Jasem Khelifi - jasemkhelifi[at]gmail.com
 
 
 ## How to cite:
