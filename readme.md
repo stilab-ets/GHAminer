@@ -106,20 +106,71 @@ python GHBMetrics.py <parameters>
 
 #### Example Usage:
 To analyze repositories from a CSV file and save the results:
+```bash
 python GHBMetrics.py -t <Your_GitHub_Token> -p /path/to/repositories.csv -fd 2023-01-01 -td 2023-12-31
-
+```
 To analyze a single repository:
+```bash
 python GHBMetrics.py -t <Your_GitHub_Token> -s <GitHub_Repository_URL> -fd 2023-01-01 -td 2023-12-31
-
+```
 
 
 ## Output:
+### Output
+
+GHBminer generates a CSV file, where each row contains metrics for a unique build. Below is an example row to illustrate the output format:
+```bash
+| Metric                       | Value                                  |
+|------------------------------|----------------------------------------|
+| repo                         | gluonhq/gluonfx-maven-plugin           |
+| id_build                     | 6171745243                             |
+| branch                       | master                                 |
+| commit_sha                   | 587198416ab5396a17fac86da131ae61f8473ef7 |
+| languages                    | Java                                   |
+| status                       | completed                              |
+| conclusion                   | success                                |
+| created_at                   | 2023-09-13T11:20:12Z                   |
+| updated_at                   | 2023-09-13T11:21:55Z                   |
+| build_duration               | 103.0                                  |
+| total_builds                 | 3                                      |
+| gh_files_added               | 0                                      |
+| gh_files_deleted             | 0                                      |
+| gh_files_modified            | 0                                      |
+| tests_ran                    | False                                  |
+| gh_lines_added               | 52                                     |
+| gh_lines_deleted             | 42                                     |
+| file_types                   | .xml                                   |
+| gh_tests_added               | 0                                      |
+| gh_tests_deleted             | 0                                      |
+| gh_test_churn                | 0                                      |
+| gh_src_churn                 | 94                                     |
+| gh_pull_req_number           | 0                                      |
+| gh_is_pr                     | False                                  |
+| gh_sloc                      | 52                                     |
+| gh_description_complexity     | 0                                      |
+| gh_src_files                 | 2                                      |
+| gh_doc_files                 | 0                                      |
+| gh_other_files               | 0                                      |
+| git_num_committers           | 8                                      |
+| gh_job_id                    | [16750594224]                          |
+| total_jobs                   | 1                                      |
+| gh_first_commit_created_at   | 2023-09-13T11:20:08Z                   |
+| gh_team_size_last_3_month    | 3                                      |
+| gh_commits_on_files_touched  | 1                                      |
+| gh_num_pr_comments           | 0                                      |
+| git_merged_with              | (empty)                                |
+| gh_test_lines_per_kloc       | 0.0                                    |
+| build_language               | java-maven                             |
+| test_framework               | []                                     |
+| tests_passed                 | 0                                      |
+| tests_failed                 | 0                                      |
+| tests_skipped                | 0                                      |
+| tests_total                  | 0                                      |
+| fetch_duration               | 4.887585639953613                      |
+```
 
 
 
-
-
-## Evaluation:
 
 
 ## Contributing
@@ -143,7 +194,5 @@ Distributed under the MIT License. See `LICENSE.md` for more information.
 ## Contact:
 Jasem Khelifi - jasemkhelifi[at]gmail.com
 
-
-## How to cite:
 
 
