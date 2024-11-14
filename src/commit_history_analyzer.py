@@ -221,8 +221,8 @@ def get_commit_data(commit_sha, repo_full_name, until_date, last_end_date, token
             break
 
         for commit in commits:
-            if counter >= 100 and last_end_date is None:
-                # For the first build, limit to 100 commits
+            if counter >= 10 and last_end_date is None:
+                # For the first build, limit to 10 commits
                 break
 
             commit_sha = commit.get('sha')
@@ -284,7 +284,7 @@ def get_commit_data(commit_sha, repo_full_name, until_date, last_end_date, token
                 commit_cache.put(commit_sha, commit_full_data)
 
         # Break out of the while loop if 100 commits have been fetched for the first build
-        if counter >= 100 and last_end_date is None:
+        if counter >= 10 and last_end_date is None:
             break
 
         # Pagination: move to the next page

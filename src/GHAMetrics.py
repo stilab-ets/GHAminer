@@ -10,7 +10,7 @@ import re
 from collections import OrderedDict
 import argparse
 
-from log_parser import parse_test_results , identify_test_frameworks , identify_build_language , get_github_actions_log
+from log_parser import parse_test_results , identify_test_frameworks_and_count_dependencies , identify_build_language , get_github_actions_log
 from commit_history_analyzer import get_commit_data
 from repo_info_collector import get_repository_languages , get_workflow_ids
 from metrics_aggregator import save_builds_to_file , save_head
@@ -21,7 +21,7 @@ import zipfile
 import io
 
 github_token = 'your_token'
-output_csv = 'builds_features.csv'
+output_csv = 'builds_features_dependency.csv'
 from_date = None
 to_date = None
 
@@ -251,7 +251,7 @@ def get_builds_info(repo_full_name, token, output_csv):
     gh_team_size = get_team_size_last_three_months(repo_full_name, token)
     repo_files = get_github_repo_files(repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
     build_language = identify_build_language(repo_files)
-    test_framework = identify_test_frameworks(repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
+    test_framework , dependency_count = identify_test_frameworks_and_count_dependencies(repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
     unique_builds = set()
     commit_cache = LRUCache(capacity=10000)
     last_end_date = None  # Initialize to track end date of each build
@@ -294,7 +294,7 @@ def get_builds_info(repo_full_name, token, output_csv):
                     build_info = compile_build_info(
                         run, repo_full_name, commit_data, commit_sha, languages,
                         len(unique_contributors),  # Pass the final unique contributor count here
-                        gh_team_size, build_language, test_framework
+                        gh_team_size, build_language, test_framework , dependency_count
                     )
                     duration_to_fetch = time.time() - start_time
                     build_info['fetch_duration'] = duration_to_fetch  # Add the duration as a new field
@@ -320,7 +320,7 @@ def get_builds_info(repo_full_name, token, output_csv):
 
 
 def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, number_of_committers, gh_team_size,
-                       build_language, test_framework):
+                       build_language, test_framework , dependency_count):
     # Parsing build start and end times
     start_time = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
     end_time = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
@@ -328,7 +328,7 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
     total_builds = get_builds_info_from_build_yml(repo_full_name, github_token, date_limit=end_time)
     jobs_ids, job_count = get_jobs_for_run(repo_full_name, run['id'], github_token)  # Get job IDs and count
     repo_files = get_github_repo_files(repo_full_name.split('/')[0], repo_full_name.split('/')[1], github_token)
-    test_frameworks = identify_test_frameworks(repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1],
+    test_frameworks , dependency_count = identify_test_frameworks_and_count_dependencies(repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1],
                                                github_token)
 
     ### NEWLY ADDED CODE ##############################################################
@@ -404,6 +404,7 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'gh_first_commit_created_at': run['head_commit']['timestamp'],
         'gh_team_size_last_3_month': gh_team_size,
         'build_language': build_language,
+        'dependencies_count': dependency_count,  # New field for dependency count
         'test_framework': test_framework,
         'tests_passed': cumulative_test_results['passed'],
         'tests_failed': cumulative_test_results['failed'],

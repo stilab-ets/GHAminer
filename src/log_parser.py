@@ -2,6 +2,37 @@ import re
 import requests
 import base64
 
+
+
+import re
+
+def count_dependencies(content, file_type):
+    """
+    Count the dependencies in the content based on the file type.
+    """
+    if file_type in ['pom.xml', 'build.gradle', 'build.gradle.kts']:
+        # Regex for Maven and Gradle dependencies
+        dependency_pattern = re.compile(r'<dependency>|implementation|compile|api|testImplementation')
+        return len(dependency_pattern.findall(content))
+    elif file_type == 'requirements.txt':
+        # Each line in requirements.txt typically represents a dependency
+        return sum(1 for line in content.splitlines() if line.strip() and not line.startswith('#'))
+    elif file_type == 'package.json':
+        # Look for "dependencies" and "devDependencies" sections in JSON
+        dependencies = re.findall(r'\"dependencies\": {([^}]+)}|\"devDependencies\": {([^}]+)}', content)
+        return sum(len(dep.split(',')) for dep in dependencies if dep)
+    elif file_type == 'Gemfile':
+        # Each line with 'gem' represents a dependency in Gemfile
+        return len(re.findall(r'^gem ', content, re.MULTILINE))
+    elif file_type == 'composer.json':
+        # Count dependencies and devDependencies sections in composer.json
+        dependencies = re.findall(r'\"require\": {([^}]+)}|\"require-dev\": {([^}]+)}', content)
+        return sum(len(dep.split(',')) for dep in dependencies if dep)
+    else:
+        # Default for unsupported types
+        return 0
+
+
 def get_github_actions_log(repo_full_name, run_id, token=None):
     """
     Fetch the logs for a specific GitHub Actions workflow run.
@@ -85,6 +116,7 @@ def identify_test_frameworks(files, owner, repo, token=None):
             if path in files:
                 try:
                     content = get_file_content(owner, repo, path, token)
+                    #print("content is : " , content)
                     #print("Framework: ", framework)
                     # print("Content: ", content)
                     if framework_dependencies[framework].search(content):
@@ -93,6 +125,30 @@ def identify_test_frameworks(files, owner, repo, token=None):
                     continue
 
     return frameworks_found
+
+
+
+def identify_test_frameworks_and_count_dependencies(files, owner, repo, token=None):
+    """
+    Identify test frameworks and count dependencies based on the presence of specific dependencies in build files.
+    """
+    test_frameworks = identify_test_frameworks(files, owner, repo, token)
+    dependency_count = 0
+
+    for file in files:
+        # Check if the file is a recognized dependency file
+        if file in ['pom.xml', 'build.gradle', 'requirements.txt', 'Gemfile', 'package.json', 'composer.json']:
+            try:
+                # Fetch the content of the dependency file
+                content = get_file_content(owner, repo, file, token)
+                # Count dependencies in this file
+                dependency_count += count_dependencies(content, file)
+            except Exception as e:
+                print(f"Error fetching or counting dependencies in {file}: {e}")
+                continue
+    
+    return test_frameworks, dependency_count
+
 
 
 
