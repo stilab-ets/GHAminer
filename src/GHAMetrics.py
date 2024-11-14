@@ -12,7 +12,7 @@ import argparse
 
 from log_parser import parse_test_results , identify_test_frameworks_and_count_dependencies , identify_build_language , get_github_actions_log
 from commit_history_analyzer import get_commit_data
-from repo_info_collector import get_repository_languages , get_workflow_ids
+from repo_info_collector import get_repository_languages , get_workflow_ids , count_lines_in_build_yml
 from metrics_aggregator import save_builds_to_file , save_head
 from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml , calculate_description_complexity
 
@@ -20,8 +20,8 @@ from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml
 import zipfile
 import io
 
-github_token = 'your_token'
-output_csv = 'builds_features_dependency.csv'
+github_token = 'your_github_token'
+output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
 
@@ -289,12 +289,14 @@ def get_builds_info(repo_full_name, token, output_csv):
                         #continue
 
                     
+                    # Fetch line count of build.yml file at the specific commit
+                    workflow_size = count_lines_in_build_yml(repo_full_name, commit_sha, token)
 
                     # Compile the build info, using the length of unique_contributors here
                     build_info = compile_build_info(
                         run, repo_full_name, commit_data, commit_sha, languages,
                         len(unique_contributors),  # Pass the final unique contributor count here
-                        gh_team_size, build_language, test_framework , dependency_count
+                        gh_team_size, build_language, test_framework , dependency_count , workflow_size
                     )
                     duration_to_fetch = time.time() - start_time
                     build_info['fetch_duration'] = duration_to_fetch  # Add the duration as a new field
@@ -320,7 +322,7 @@ def get_builds_info(repo_full_name, token, output_csv):
 
 
 def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, number_of_committers, gh_team_size,
-                       build_language, test_framework , dependency_count):
+                       build_language, test_framework , dependency_count , workflow_size):
     # Parsing build start and end times
     start_time = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
     end_time = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
@@ -404,7 +406,8 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'gh_first_commit_created_at': run['head_commit']['timestamp'],
         'gh_team_size_last_3_month': gh_team_size,
         'build_language': build_language,
-        'dependencies_count': dependency_count,  # New field for dependency count
+        'dependencies_count': dependency_count,  
+        'workflow_size': workflow_size, 
         'test_framework': test_framework,
         'tests_passed': cumulative_test_results['passed'],
         'tests_failed': cumulative_test_results['failed'],
