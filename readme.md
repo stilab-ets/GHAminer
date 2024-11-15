@@ -120,6 +120,7 @@ python GHBMetrics.py -t <Your_GitHub_Token> -s <GitHub_Repository_URL> -fd 2023-
 
 
 For detailed usage, please refer to this video:
+
 [![Video Title](https://img.youtube.com/vi/4ZC71ootygA/0.jpg)](https://www.youtube.com/watch?v=4ZC71ootygA)
 
 
