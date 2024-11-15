@@ -11,6 +11,7 @@ from collections import OrderedDict
 import argparse
 
 from log_parser import parse_test_results , identify_test_frameworks_and_count_dependencies , identify_build_language , get_github_actions_log
+from patterns import framework_regex
 from commit_history_analyzer import get_commit_data
 from repo_info_collector import get_repository_languages , get_workflow_ids , count_lines_in_build_yml
 from metrics_aggregator import save_builds_to_file , save_head
@@ -20,7 +21,7 @@ from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml
 import zipfile
 import io
 
-github_token = 'your_github_token'
+github_token = 'your_token'  
 output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
@@ -244,7 +245,7 @@ def get_github_repo_files(owner, repo, token=None):
 
 # end new functions
 
-def get_builds_info(repo_full_name, token, output_csv):
+def get_builds_info(repo_full_name, token, output_csv , framework_regex):
     languages = get_repository_languages(repo_full_name, token)
     build_workflow_ids = get_workflow_ids(repo_full_name, token)
     number_of_committers, _ = get_unique_committers(repo_full_name)
@@ -296,7 +297,7 @@ def get_builds_info(repo_full_name, token, output_csv):
                     build_info = compile_build_info(
                         run, repo_full_name, commit_data, commit_sha, languages,
                         len(unique_contributors),  # Pass the final unique contributor count here
-                        gh_team_size, build_language, test_framework , dependency_count , workflow_size
+                        gh_team_size, build_language, test_framework , dependency_count , workflow_size , framework_regex
                     )
                     duration_to_fetch = time.time() - start_time
                     build_info['fetch_duration'] = duration_to_fetch  # Add the duration as a new field
@@ -322,7 +323,7 @@ def get_builds_info(repo_full_name, token, output_csv):
 
 
 def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, number_of_committers, gh_team_size,
-                       build_language, test_framework , dependency_count , workflow_size):
+                       build_language, test_framework , dependency_count , workflow_size , framework_regex):
     # Parsing build start and end times
     start_time = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
     end_time = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
@@ -348,7 +349,7 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
                     with zip_ref.open(file_info) as log_file:
                         log_content = log_file.read().decode('utf-8')
                         if log_content:
-                            test_results = parse_test_results(determined_framework, log_content, build_language)
+                            test_results = parse_test_results(determined_framework, log_content, build_language , framework_regex)
                             cumulative_test_results['passed'] += test_results['passed']
                             cumulative_test_results['failed'] += test_results['failed']
                             cumulative_test_results['skipped'] += test_results['skipped']
@@ -462,7 +463,7 @@ def main():
         # Check if the URL is valid before proceeding
         if len(name) >= 2:
             repo_full_name = f"{name[-2]}/{name[-1]}"
-            get_builds_info(repo_full_name, github_token, output_csv)
+            get_builds_info(repo_full_name, github_token, output_csv , framework_regex)
         else:
             print(name)
             logging.error(f"Invalid URL format for project: {project}")
