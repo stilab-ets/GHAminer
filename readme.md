@@ -94,7 +94,7 @@ GHAminer is a standalone Python script that can be executed from the command lin
 To run GHAminer, use the following command along with the specified parameters:
 
 ```bash
-python GHBMetrics.py <parameters>
+python GHAMetrics.py.py <parameters>
 ```
 #### Parameters:
 
@@ -111,11 +111,11 @@ python GHBMetrics.py <parameters>
 #### Example Usage:
 To analyze repositories from a CSV file and save the results:
 ```bash
-python GHBMetrics.py -t <Your_GitHub_Token> -p /path/to/repositories.csv -fd 2023-01-01 -td 2023-12-31
+python GHAMetrics.py.py -t <Your_GitHub_Token> -p /path/to/repositories.csv -fd 2023-01-01 -td 2023-12-31
 ```
 To analyze a single repository:
 ```bash
-python GHBMetrics.py -t <Your_GitHub_Token> -s <GitHub_Repository_URL> -fd 2023-01-01 -td 2023-12-31
+python GHAMetrics.py.py -t <Your_GitHub_Token> -s <GitHub_Repository_URL> -fd 2023-01-01 -td 2023-12-31
 ```
 
 
