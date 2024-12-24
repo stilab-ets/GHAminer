@@ -429,44 +429,54 @@ def main():
     global to_date
     global from_date
     projects_file = 'github_projects.csv'
+    single_project = None
     parser = argparse.ArgumentParser()
     parser.add_argument("-t", "--token", help="github token")
     parser.add_argument("-p", "--projects", help="csv of projects list")
+    parser.add_argument("-s", "--single-project", help="GitHub repository URL for single project analysis")
     parser.add_argument("-fd", "--from_date", help="since date")
     parser.add_argument("-td", "--to_date", help="to date")
     args = parser.parse_args()
-    if args.token : 
+
+    if args.token: 
         github_token = args.token
     if args.projects:
         projects_file = args.projects
+    if args.single_project:
+        single_project = args.single_project
     if args.to_date:
         to_date = args.to_date
     if args.from_date:
-        to_date = args.from_date
-
-    
+        from_date = args.from_date
 
     projects = []
     
-    # Read the CSV file and append projects
-    with open(projects_file, 'r') as csvfile:
-        csv_reader = csv.reader(csvfile)
-        for row in csv_reader:
-            projects.append(row[0])
+    # Handle single project or projects file
+    if single_project:
+        # If a single project is specified, process only that
+        repo_full_name = single_project.split('/')[-2] + '/' + single_project.split('/')[-1]
+        save_head(output_csv)
+        get_builds_info(repo_full_name, github_token, output_csv, framework_regex)
+    else:
+        # If a CSV file is provided, process all projects in the file
+        with open(projects_file, 'r') as csvfile:
+            csv_reader = csv.reader(csvfile)
+            for row in csv_reader:
+                projects.append(row[0])
 
-    save_head(output_csv)
-    
-    # Process each project URL
-    for project in projects:
-        name = project.split('/')
+        save_head(output_csv)
         
-        # Check if the URL is valid before proceeding
-        if len(name) >= 2:
-            repo_full_name = f"{name[-2]}/{name[-1]}"
-            get_builds_info(repo_full_name, github_token, output_csv , framework_regex)
-        else:
-            print(name)
-            logging.error(f"Invalid URL format for project: {project}")
+        # Process each project URL
+        for project in projects:
+            name = project.split('/')
+            
+            # Check if the URL is valid before proceeding
+            if len(name) >= 2:
+                repo_full_name = f"{name[-2]}/{name[-1]}"
+                get_builds_info(repo_full_name, github_token, output_csv, framework_regex)
+            else:
+                print(name)
+                logging.error(f"Invalid URL format for project: {project}")
     
     logging.info("Build information processed and saved to output CSV.")
 
