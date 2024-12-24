@@ -6,7 +6,7 @@ These metrics, listed in the next section (Metrics), capture build outcomes and 
 
 
 ## Metrics:
-The following table provides the list of the 45 metrics collected by GHBMiner:
+The following table provides the list of the 45 metrics collected by GHAminer:
 
 | Metric Name                | Description                                                                                                 | Unit / Example          |
 |----------------------------|-------------------------------------------------------------------------------------------------------------|--------------------------|
@@ -60,7 +60,7 @@ The following table provides the list of the 45 metrics collected by GHBMiner:
 
 
 ## Getting Started:
-To get a local copy of GHBminer up and running, follow these steps.
+To get a local copy of GHAminer up and running, follow these steps.
 
 #### Prerequisites
 
@@ -77,21 +77,21 @@ pip install requests
 #### Installation
 1. Clone the repository:
 ```bash
-git clone https://github.com/stilab-ets/GHBminer.git
+git clone https://github.com/stilab-ets/GHAminer.git
 ```
 
 2. Navigate to the project directory:
 ```bash
-cd GHBminer
+cd GHAminer
 ```
 
 
 
 ## Usage:
 
-GHBminer is a standalone Python script that can be executed from the command line on any operating system with Python 3.x installed. 
+GHAminer is a standalone Python script that can be executed from the command line on any operating system with Python 3.x installed. 
 
-To run GHBminer, use the following command along with the specified parameters:
+To run GHAminer, use the following command along with the specified parameters:
 
 ```bash
 python GHBMetrics.py <parameters>
@@ -125,7 +125,7 @@ For detailed usage, please refer to this video:
 
 
 ## Output:
-GHBminer generates a CSV file, where each row contains metrics for a unique build. Please refer to `example_output.csv` for an example of build metrics collected for one repository.
+GHAminer generates a CSV file, where each row contains metrics for a unique build. Please refer to `example_output.csv` for an example of build metrics collected for one repository.
 
 
 ## Contributing
