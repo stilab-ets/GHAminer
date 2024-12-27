@@ -108,6 +108,24 @@ python GHAMetrics.py.py <parameters>
 
 `-td` : End date for the date range of builds to retrieve.
 
+
+
+## GitHub Token Permissions:
+To ensure GHAminer runs successfully, your GitHub token must have the following permissions:
+
+- **Actions**: Read access
+  - To fetch workflows, runs, logs, and job details.
+- **Contents**: Read access
+  - To retrieve files and their contents (e.g., `.github/workflows/build.yml`).
+- **Commits**: Read access
+  - To access commit details and contributors.
+- **Metadata**: Read access
+  - To access repository details, such as languages and contributors.
+- **Pull Requests**: Read access
+  - To retrieve pull request details, comments, and merge commits.
+- **Contributors**: Read access
+  - To fetch the list of contributors to the repository.
+
 #### Example Usage:
 To analyze repositories from a CSV file and save the results:
 ```bash
