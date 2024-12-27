@@ -96,6 +96,10 @@ To run GHAminer, use the following command along with the specified parameters:
 ```bash
 python GHAMetrics.py.py <parameters>
 ```
+
+#### Input projects csv file (github_projects.csv): 
+Ensure the CSV file does not contain a header (column name), and each row contains a single GitHub repository link.
+
 #### Parameters:
 
 `-t, --token` : GitHub personal access token for API access.
