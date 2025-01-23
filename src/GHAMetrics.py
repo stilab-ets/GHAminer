@@ -9,11 +9,12 @@ import base64
 import re
 from collections import OrderedDict
 import argparse
+import json
 
 from log_parser import parse_test_results , identify_test_frameworks_and_count_dependencies , identify_build_language , get_github_actions_log
 from patterns import framework_regex
-from commit_history_analyzer import get_commit_data
-from repo_info_collector import get_repository_languages , get_workflow_ids , count_lines_in_build_yml
+from commit_history_analyzer import get_commit_data, get_commit_data_local, clone_repo_locally
+from repo_info_collector import get_repository_languages , get_workflow_ids , count_lines_in_build_yml , get_workflow_all_ids
 from metrics_aggregator import save_builds_to_file , save_head
 from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml , calculate_description_complexity
 
@@ -21,7 +22,7 @@ from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml
 import zipfile
 import io
 
-github_token = 'your_token'  
+github_token = 'your_token_here'  
 output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
@@ -107,30 +108,6 @@ def fetch_file_content(repo_full_name, path, commit_sha, token):
         logging.error(f"Failed to fetch file content: {response.status_code}, URL: {url}")
     return ""  # Return empty string if there is an error fetching the file
 
-
-
-
-def get_unique_committers(repo_full_name):
-    url = f"https://api.github.com/repos/{repo_full_name}/contributors"
-    headers = {}
-    committers = set()
-
-    while url:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            contributors = response.json()
-            for contributor in contributors:
-                # Add the login name of the contributor
-                committers.add(contributor['login'])
-            # Pagination: Check if there is a 'next' page
-            if 'next' in response.links:
-                url = response.links['next']['url']
-            else:
-                break
-        else:
-            logging.error(f"Failed to fetch contributors, status code: {response.status_code}, URL: {url}")
-            break
-    return len(committers), committers
 
 
 def get_team_size_last_three_months(repo_full_name, token):
@@ -245,14 +222,33 @@ def get_github_repo_files(owner, repo, token=None):
 
 # end new functions
 
-def get_builds_info(repo_full_name, token, output_csv , framework_regex):
+def get_builds_info(repo_full_name, token, output_csv, framework_regex):
+    local_repo_path = f"/tmp/{repo_full_name.replace('/', '_')}.git"
+    repo_url = f"https://github.com/{repo_full_name}.git"
+
+    # Clone the repository only once at the start
+    clone_repo_locally(repo_url, local_repo_path)
+
+    # Read the configuration from config.json
+    try:
+        with open("config.json", "r") as config_file:
+            config = json.load(config_file)
+        fetch_all_workflows = config.get("fetch_all_workflows", True)  # Default to True
+    except FileNotFoundError:
+        logging.warning("config.json not found. Defaulting to fetching all workflows.")
+        fetch_all_workflows = True
+
+    # Call the appropriate function based on the configuration
+    if fetch_all_workflows:
+        build_workflow_ids = get_workflow_all_ids(repo_full_name, token)
+    else:
+        build_workflow_ids = get_workflow_ids(repo_full_name, token)
+
     languages = get_repository_languages(repo_full_name, token)
-    build_workflow_ids = get_workflow_ids(repo_full_name, token)
-    number_of_committers, _ = get_unique_committers(repo_full_name)
     gh_team_size = get_team_size_last_three_months(repo_full_name, token)
     repo_files = get_github_repo_files(repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
     build_language = identify_build_language(repo_files)
-    test_framework , dependency_count = identify_test_frameworks_and_count_dependencies(repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
+    test_frameworks, dependency_count = identify_test_frameworks_and_count_dependencies(repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
     unique_builds = set()
     commit_cache = LRUCache(capacity=10000)
     last_end_date = None  # Initialize to track end date of each build
@@ -260,11 +256,21 @@ def get_builds_info(repo_full_name, token, output_csv , framework_regex):
     # Initialize a set to track unique contributors up to each commit
     unique_contributors = set()
 
+    # Dictionary to map workflow IDs to their names
+    workflow_names = {}
+
     if not build_workflow_ids:
-        logging.error("No build workflows found.")
+        logging.error("No workflows found.")
         return
 
+    # Fetch workflow names and map them to IDs
+    workflows_response = get_request(f"https://api.github.com/repos/{repo_full_name}/actions/workflows", token)
+    if workflows_response and 'workflows' in workflows_response:
+        for workflow in workflows_response['workflows']:
+            workflow_names[workflow['id']] = workflow['name']
+
     for workflow_id in build_workflow_ids:
+        total_builds = 0
         page = 1
         sloc, test = 0, 0
         while True:
@@ -278,33 +284,34 @@ def get_builds_info(repo_full_name, token, output_csv , framework_regex):
                         logging.info(f"Skipping duplicate build {run_id}")
                         continue
                     unique_builds.add(run_id)
+                    total_builds += 1
 
                     start_time = time.time()
 
                     commit_sha = run['head_sha']
                     until_date = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
-                    # Pass the unique_contributors set to be updated within get_commit_data
-                    commit_data = get_commit_data(commit_sha, repo_full_name, until_date, last_end_date, token, sloc, test, commit_cache, unique_contributors)
-                    #if commit_data.get('gh_sloc', 0) == 0:
-                        #logging.info(f"Skipping commit {commit_sha} with 0 SLOC")
-                        #continue
+                    # Pass the unique_contributors set to be updated within get_commit_data_local
+                    commit_data = get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors)
 
-                    
                     # Fetch line count of build.yml file at the specific commit
                     workflow_size = count_lines_in_build_yml(repo_full_name, commit_sha, token)
 
                     # Compile the build info, using the length of unique_contributors here
                     build_info = compile_build_info(
                         run, repo_full_name, commit_data, commit_sha, languages,
-                        len(unique_contributors),  # Pass the final unique contributor count here
-                        gh_team_size, build_language, test_framework , dependency_count , workflow_size , framework_regex
+                        len(unique_contributors), total_builds,
+                        gh_team_size, build_language, test_frameworks, dependency_count, workflow_size, framework_regex
                     )
+
+                    # Add workflow name to build info
+                    build_info['workflow_name'] = workflow_names.get(workflow_id, "Unknown")
+
                     duration_to_fetch = time.time() - start_time
                     build_info['fetch_duration'] = duration_to_fetch  # Add the duration as a new field
                     builds_info.clear()
                     builds_info.append(build_info)
                     save_builds_to_file(builds_info, output_csv)
-                    
+
                     # Update last_end_date to the end time of this build
                     last_end_date = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
 
@@ -322,17 +329,15 @@ def get_builds_info(repo_full_name, token, output_csv , framework_regex):
 
 
 
-def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, number_of_committers, gh_team_size,
-                       build_language, test_framework , dependency_count , workflow_size , framework_regex):
+
+
+def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, number_of_committers, total_builds, gh_team_size,
+                       build_language, test_frameworks , dependency_count , workflow_size , framework_regex):
     # Parsing build start and end times
     start_time = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
     end_time = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
     duration = (end_time - start_time).total_seconds()
-    total_builds = get_builds_info_from_build_yml(repo_full_name, github_token, date_limit=end_time)
     jobs_ids, job_count = get_jobs_for_run(repo_full_name, run['id'], github_token)  # Get job IDs and count
-    repo_files = get_github_repo_files(repo_full_name.split('/')[0], repo_full_name.split('/')[1], github_token)
-    test_frameworks , dependency_count = identify_test_frameworks_and_count_dependencies(repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1],
-                                               github_token)
 
     ### NEWLY ADDED CODE ##############################################################
     # You may get multiple frameworks; decide how to handle this case
@@ -347,14 +352,15 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
             for file_info in zip_ref.infolist():
                 if file_info.filename.endswith('.txt'):
                     with zip_ref.open(file_info) as log_file:
-                        log_content = log_file.read().decode('utf-8')
-                        if log_content:
-                            test_results = parse_test_results(determined_framework, log_content, build_language , framework_regex)
-                            cumulative_test_results['passed'] += test_results['passed']
-                            cumulative_test_results['failed'] += test_results['failed']
-                            cumulative_test_results['skipped'] += test_results['skipped']
-                            cumulative_test_results['total'] += test_results['total']
-                            print(f"Parsed test results from {file_info.filename}: {test_results}")
+                        for line in log_file:
+                            log_content = line.decode('utf-8').strip()  # Process line-by-line
+                            if log_content:
+                                test_results = parse_test_results(determined_framework, log_content, build_language, framework_regex)
+                                cumulative_test_results['passed'] += test_results['passed']
+                                cumulative_test_results['failed'] += test_results['failed']
+                                cumulative_test_results['skipped'] += test_results['skipped']
+                                cumulative_test_results['total'] += test_results['total']
+                                print(f"Parsed test results from {file_info.filename}: {test_results}")
     except zipfile.BadZipFile:
         print(f"Failed to unzip log file for build {run['id']}")
     ### END OF NEWLY ADDED CODE #######################################################
@@ -387,6 +393,7 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'id_build': run['id'],
         'branch': run['head_branch'],
         'commit_sha': commit_sha,
+        'workflow_name': "Unknown",
         'languages': languages,
         'status': run['status'],
         'conclusion': run['conclusion'],
@@ -409,7 +416,7 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'build_language': build_language,
         'dependencies_count': dependency_count,  
         'workflow_size': workflow_size, 
-        'test_framework': test_framework,
+        'test_framework': test_frameworks,
         'tests_passed': cumulative_test_results['passed'],
         'tests_failed': cumulative_test_results['failed'],
         'tests_skipped': cumulative_test_results['skipped'],

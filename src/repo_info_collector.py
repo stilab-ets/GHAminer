@@ -68,3 +68,20 @@ def get_workflow_ids(repo_full_name, token):
             if '/build.yml' in workflow['path'].lower():
                 build_workflow_ids.append(workflow['id'])
     return build_workflow_ids
+
+
+
+def get_workflow_all_ids(repo_full_name, token):
+    """
+    Fetch all workflow IDs for a given repository.
+    """
+    url = f"https://api.github.com/repos/{repo_full_name}/actions/workflows"
+    workflows_response = get_request(url, token)
+    workflow_ids = []
+    
+    if workflows_response and 'workflows' in workflows_response:
+        for workflow in workflows_response['workflows']:
+            # Collect all workflow IDs, regardless of their names or paths
+            workflow_ids.append(workflow['id'])
+    
+    return workflow_ids

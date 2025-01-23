@@ -3,8 +3,14 @@ import logging
 from datetime import datetime, timezone, timedelta
 import os
 from file_indicators import is_production_file , is_test_file
+import subprocess
 
 
+def clone_repo_locally(repo_url, local_path):
+    if not os.path.exists(local_path):
+        subprocess.run(["git", "clone", "--mirror", repo_url, local_path], check=True)
+    else:
+        print(f"Repository {repo_url} already cloned.")
 
 
 def is_documentation_file(file_path):
@@ -125,6 +131,80 @@ def fetch_full_commit_data(commit_sha, repo_full_name, token, unique_contributor
     except Exception as e:
         logging.error(f"Error in fetch_full_commit_data: {e}")
         return {}
+    
+
+
+def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributors):
+    """Fetch detailed commit data using local Git instead of GitHub API."""
+    try:
+        # Get commit details using git show
+        result = subprocess.run(
+            ["git", "-C", local_repo_path, "show", "--format=fuller", "--stat", commit_sha],
+            capture_output=True, text=True, check=True
+        )
+        output = result.stdout
+
+        # Extract commit metadata
+        total_added = total_removed = tests_added = tests_removed = 0
+        src_files = doc_files = other_files = 0
+        file_types = set()
+
+        author_line = next((line for line in output.splitlines() if line.startswith("Author:")), None)
+        if author_line:
+            author_name = author_line.split("Author:")[1].strip()
+            unique_contributors.add(author_name)
+
+        for line in output.splitlines():
+            # File change line format: "<filename> | <num> insertions(+), <num> deletions(-)"
+            if "|" in line:
+                parts = line.split("|")
+                filename = parts[0].strip()
+                stats = parts[1].strip()
+                print("filename is : ", filename)
+                print("stats is : ", stats)
+
+                # Count the number of '+' and '-' in the stats
+                additions = stats.count('+')
+                deletions = stats.count('-')
+
+                # Classify file types
+                if is_test_file(filename):
+                    tests_added += additions
+                    tests_removed += deletions
+                elif is_production_file(filename):
+                    total_added += additions
+                    total_removed += deletions
+                    src_files += 1
+                elif is_documentation_file(filename):
+                    doc_files += 1
+                else:
+                    other_files += 1
+
+                # Track unique file types
+                file_extension = os.path.splitext(filename)[1]
+                if file_extension:
+                    file_types.add(file_extension)
+
+        return {
+            'total_added': total_added,
+            'total_removed': total_removed,
+            'tests_added': tests_added,
+            'tests_removed': tests_removed,
+            'src_files': src_files,
+            'doc_files': doc_files,
+            'other_files': other_files,
+            'file_types': file_types,
+        }
+
+    except subprocess.CalledProcessError:
+        logging.error(f"Failed to fetch commit details for {commit_sha}")
+        return {}
+    except Exception as e:
+        logging.error(f"Error in fetch_full_commit_data_local: {e}")
+        return {}
+
+
+
 
 
 def get_commit_data(commit_sha, repo_full_name, until_date, last_end_date, token, sloc, test, commit_cache, unique_contributors):
@@ -273,6 +353,116 @@ def get_commit_data(commit_sha, repo_full_name, until_date, last_end_date, token
         params['page'] = params.get('page', 1) + 1
 
     # Compile and return the final data for commits up to `last_end_date`
+    return compile_final_data(
+        total_added, total_removed, tests_added, tests_removed,
+        src_files, doc_files, other_files, unique_files_added,
+        unique_files_deleted, unique_files_modified, file_types,
+        commits_on_files_touched, unique_contributors, commit_cache, commit_sha
+    )
+
+
+
+
+def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors):
+    # Initialize metrics
+    total_added = total_removed = tests_added = tests_removed = 0
+    src_files = doc_files = other_files = unique_files_added = unique_files_deleted = unique_files_modified = 0
+    file_types = set()
+    commits_on_files_touched = set()
+
+    # Check if the commit data is cached
+    cached_data = commit_cache.get(commit_sha)
+    if cached_data:
+        if all(key in cached_data for key in ['total_added', 'total_removed', 'tests_added', 'tests_removed']):
+            # Use cached data if available and complete
+            total_added += cached_data['total_added']
+            total_removed += cached_data['total_removed']
+            tests_added += cached_data['tests_added']
+            tests_removed += cached_data['tests_removed']
+            src_files += cached_data['src_files']
+            doc_files += cached_data['doc_files']
+            other_files += cached_data['other_files']
+            file_types.update(cached_data['file_types'])
+            commits_on_files_touched.add(commit_sha)
+        else:
+            # If incomplete, delete the cache and re-fetch
+            commit_cache.delete(commit_sha)
+            cached_data = None
+
+    if not cached_data:
+        # Fetch and cache the initiating commit data locally
+        commit_full_data = fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributors)
+        if commit_full_data:
+            commits_on_files_touched.add(commit_sha)
+            total_added += commit_full_data['total_added']
+            total_removed += commit_full_data['total_removed']
+            tests_added += commit_full_data['tests_added']
+            tests_removed += commit_full_data['tests_removed']
+            src_files += commit_full_data['src_files']
+            doc_files += commit_full_data['doc_files']
+            other_files += commit_full_data['other_files']
+            file_types.update(commit_full_data['file_types'])
+
+            # Cache the data only if complete
+            commit_cache.put(commit_sha, commit_full_data)
+
+    # Get commits within the date range
+    if last_end_date is None:
+        # First build: limit to 10 commits (to mimic the API behavior)
+        git_log_command = [
+            "git", "-C", local_repo_path, "log", f"--until={until_date.isoformat()}Z", "-n", "10", "--pretty=format:%H"
+        ]
+    else:
+        # Subsequent builds: get commits between `until_date` and `last_end_date`
+        git_log_command = [
+            "git", "-C", local_repo_path, "log",
+            f"--since={last_end_date.isoformat()}Z", f"--until={until_date.isoformat()}Z",
+            "--pretty=format:%H"
+        ]
+
+    try:
+        result = subprocess.run(git_log_command, capture_output=True, text=True, check=True)
+        commit_shas = result.stdout.splitlines()
+
+        # Iterate over each commit SHA and collect data
+        for commit_sha in commit_shas:
+            # Check cache to avoid redundant calls
+            cached_data = commit_cache.get(commit_sha)
+            if cached_data:
+                if all(key in cached_data for key in ['total_added', 'total_removed', 'tests_added', 'tests_removed']):
+                    total_added += cached_data['total_added']
+                    total_removed += cached_data['total_removed']
+                    tests_added += cached_data['tests_added']
+                    tests_removed += cached_data['tests_removed']
+                    src_files += cached_data['src_files']
+                    doc_files += cached_data['doc_files']
+                    other_files += cached_data['other_files']
+                    file_types.update(cached_data['file_types'])
+                    commits_on_files_touched.add(commit_sha)
+                    continue
+                else:
+                    commit_cache.delete(commit_sha)
+
+            # Fetch details for each commit locally
+            commit_full_data = fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributors)
+            if commit_full_data:
+                commits_on_files_touched.add(commit_sha)
+                total_added += commit_full_data['total_added']
+                total_removed += commit_full_data['total_removed']
+                tests_added += commit_full_data['tests_added']
+                tests_removed += commit_full_data['tests_removed']
+                src_files += commit_full_data['src_files']
+                doc_files += commit_full_data['doc_files']
+                other_files += commit_full_data['other_files']
+                file_types.update(commit_full_data['file_types'])
+
+                # Cache the data for efficiency
+                commit_cache.put(commit_sha, commit_full_data)
+
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error running git log for {local_repo_path}: {e}")
+
+    # Compile the final data
     return compile_final_data(
         total_added, total_removed, tests_added, tests_removed,
         src_files, doc_files, other_files, unique_files_added,
