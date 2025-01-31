@@ -1,8 +1,8 @@
 import re
 import requests
 import base64
-
-
+from request_github import get_request
+import logging
 
 import re
 
@@ -33,37 +33,79 @@ def count_dependencies(content, file_type):
         return 0
 
 
-def get_github_actions_log(repo_full_name, run_id, token=None):
+import time
+import requests
+import logging
+
+def get_github_actions_log(repo_full_name, run_id, token=None, max_retries=3):
     """
     Fetch the logs for a specific GitHub Actions workflow run.
+    Handles binary (ZIP) responses correctly and retries on rate limits.
     """
     url = f"https://api.github.com/repos/{repo_full_name}/actions/runs/{run_id}/logs"
     headers = {"Authorization": f"token {token}"} if token else {}
 
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.content
-    except requests.exceptions.HTTPError as http_err:
-        print(f"HTTP error occurred: {http_err} - URL: {url}")
-        return None
-    except Exception as err:
-        print(f"Other error occurred: {err} - URL: {url}")
-        return None
-    
+    retries = 0  # Track retries
+
+    while retries < max_retries:
+        try:
+            response = requests.get(url, headers=headers, stream=True)  # Use raw binary stream
+            
+            if response.status_code == 200:
+                return response.content  # Return raw binary log data
+            
+            elif response.status_code == 403:  # Rate limit exceeded
+                rate_limit_reset = response.headers.get("X-RateLimit-Reset")
+                if rate_limit_reset:
+                    wait_time = int(rate_limit_reset) - int(time.time()) + 1  # Ensure at least 1s wait
+                    logging.warning(f"GitHub API rate limit exceeded. Sleeping for {wait_time} seconds...")
+                    time.sleep(wait_time)  # Sleep until the rate limit resets
+                else:
+                    logging.warning("GitHub API rate limit hit but no reset time provided. Sleeping for 60s.")
+                    #time.sleep(1)  # Default sleep time before retrying
+                
+            elif response.status_code == 404:
+                logging.error(f"Logs for build {run_id} in {repo_full_name} were not found. They may have expired.")
+                return None  # No point retrying if logs don't exist
+            
+            else:
+                logging.error(f"Failed to fetch logs for run {run_id} in {repo_full_name}, Status: {response.status_code}")
+                return None  # Other errors should not be retried
+            
+        except requests.exceptions.RequestException as err:
+            logging.error(f"Unexpected error fetching logs for run {run_id} in {repo_full_name}: {err}")
+        
+        retries += 1
+        logging.warning(f"Retrying log fetch for {repo_full_name}, run {run_id} (attempt {retries}/{max_retries})")
+        time.sleep(5)  # Short delay before retrying
+
+    logging.error(f"Failed to fetch logs after {max_retries} retries for run {run_id} in {repo_full_name}")
+    return None  # Return None if all retries fail
+
 
     
 def get_file_content(owner, repo, path, token=None):
     """
     Fetch the content of a file from a GitHub repository.
+    Uses get_request to handle rate limits properly.
+    Includes explicit error handling.
     """
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
-    headers = {"Authorization": f"token {token}"} if token else {}
 
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    content = response.json().get('content', '')
-    return base64.b64decode(content).decode('utf-8')
+    try:
+        response = get_request(url, token)
+        if response and 'content' in response:
+            return base64.b64decode(response['content']).decode('utf-8')
+        else:
+            logging.error(f"Failed to fetch file content for {path} in {owner}/{repo}")
+            return None
+    except base64.binascii.Error as decode_err:
+        logging.error(f"Error decoding file content for {path} in {owner}/{repo}: {decode_err}")
+        return None
+    except Exception as err:
+        logging.error(f"Unexpected error fetching file content for {path} in {owner}/{repo}: {err}")
+        return None
+
 
 def summarize_test_results(test_results):
     """

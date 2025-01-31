@@ -4,47 +4,36 @@ from datetime import datetime, timezone, timedelta
 import time
 import math
 import base64
+from request_github import get_request
 
 
-def get_request(url, token):
-    headers = {'Authorization': f'token {token}'}
-    attempt = 0
-    while attempt < 5:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 403 and 'X-RateLimit-Reset' in response.headers:
-            reset_time = datetime.fromtimestamp(int(response.headers['X-RateLimit-Reset']), timezone.utc)
-            sleep_time = (reset_time - datetime.now(timezone.utc)).total_seconds() + 10
-            logging.error(f"Rate limit exceeded, sleeping for {sleep_time} seconds. URL: {url}")
-            time.sleep(sleep_time)
-        else:
-            logging.error(
-                f"Failed to fetch data, status code: {response.status_code}, URL: {url}, Response: {response.text}")
-            time.sleep(math.pow(2, attempt) * 10)  # Exponential backoff
-        attempt += 1
-    return None
-
-def count_lines_in_build_yml(repo_full_name, commit_sha, token):
+def count_lines_in_workflow_yml(repo_full_name, workflow_path, commit_sha, token):
     """
-    Fetch the build.yml file content at a specific commit SHA and count its lines.
+    Fetch the workflow YAML file content at a specific commit SHA and count its lines.
+    Uses get_request to handle rate limits and retries properly.
     """
-    url = f"https://api.github.com/repos/{repo_full_name}/contents/.github/workflows/build.yml?ref={commit_sha}"
-    headers = {'Authorization': f'token {token}'}
-    response = requests.get(url, headers=headers)
-    
-    if response.status_code == 200:
-        file_data = response.json()
-        if 'content' in file_data:
-            # Decode content from base64 and split by lines to count them
-            content = base64.b64decode(file_data['content']).decode('utf-8')
-            print("length of content of workflow is : "  , len(content.splitlines()))
-            return len(content.splitlines())
+    url = f"https://api.github.com/repos/{repo_full_name}/contents/{workflow_path}?ref={commit_sha}"
+
+    try:
+        response = get_request(url, token)
+        if response and 'content' in response:
+            try:
+                # Decode Base64 content, split by lines, and count
+                content = base64.b64decode(response['content']).decode('utf-8')
+                line_count = len(content.splitlines())
+                print(f"Length of content of {workflow_path}: {line_count}")
+                return line_count
+            except base64.binascii.Error as decode_err:
+                logging.error(f"Error decoding {workflow_path} at commit {commit_sha}: {decode_err}")
+                return 0
         else:
-            logging.error(f"No content found in build.yml at commit {commit_sha}")
-    else:
-        logging.error(f"Failed to fetch build.yml at commit {commit_sha}: {response.status_code}")
+            logging.error(f"No content found in {workflow_path} at commit {commit_sha}")
+    except Exception as err:
+        logging.error(f"Unexpected error fetching {workflow_path} at commit {commit_sha}: {err}")
+
     return 0  # Return 0 if there's an issue with fetching or decoding
+
+
 
 
 def get_repository_languages(repo_full_name, token):

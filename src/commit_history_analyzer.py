@@ -6,11 +6,44 @@ from file_indicators import is_production_file , is_test_file
 import subprocess
 
 
-def clone_repo_locally(repo_url, local_path):
-    if not os.path.exists(local_path):
-        subprocess.run(["git", "clone", "--mirror", repo_url, local_path], check=True)
+import shutil
+
+import os
+import subprocess
+import shutil
+
+def clone_repo_locally(repo_url, base_path):
+    """Clone the repository inside a tmp/ directory in the project folder."""
+    tmp_dir = os.path.join(base_path, "tmp")  # Ensure tmp directory inside project
+    os.makedirs(tmp_dir, exist_ok=True)  # Create tmp/ if it doesn't exist
+
+    repo_name = repo_url.split("/")[-1].replace(".git", "")  # Ensure clean repo name
+    local_repo_path = os.path.join(tmp_dir, repo_name)  # Unique folder for each repo
+    git_path = shutil.which("git") or r"C:\Program Files\Git\cmd\git.exe"  # Find git
+
+    print(f"📂 Cloning repo into: {local_repo_path}")
+
+    if not os.path.exists(local_repo_path):
+        result = subprocess.run([git_path, "clone", repo_url, local_repo_path], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            logging.error(f"Error cloning repo: {result.stderr}")
+            return None  # Return None if cloning fails
+        else:
+            print(f"✅ Successfully cloned repo into {local_repo_path}")
     else:
-        print(f"Repository {repo_url} already cloned.")
+        print(f"🟡 Repository already exists at {local_repo_path}, ensuring all commits are available.")
+
+    # Ensure full commit history is available
+    try:
+        subprocess.run([git_path, "-C", local_repo_path, "fetch", "--all"], check=True, capture_output=True, text=True)
+        subprocess.run([git_path, "-C", local_repo_path, "pull", "--all"], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to fetch all commits for {repo_name}: {e}")
+
+    return local_repo_path  # Return the path so it can be used later
+
+
 
 
 def is_documentation_file(file_path):
@@ -137,55 +170,70 @@ def fetch_full_commit_data(commit_sha, repo_full_name, token, unique_contributor
 def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributors):
     """Fetch detailed commit data using local Git instead of GitHub API."""
     try:
-        # Get commit details using git show
+        # Ensure the repository exists
+        if not os.path.exists(local_repo_path):
+            logging.error(f"Repository path does not exist: {local_repo_path}")
+            return {}
+
+        # Get commit details (author name and changed files)
         result = subprocess.run(
-            ["git", "-C", local_repo_path, "show", "--format=fuller", "--stat", commit_sha],
+            ["git", "-C", local_repo_path, "show", "--numstat", "--pretty=format:%an", commit_sha],
             capture_output=True, text=True, check=True
         )
-        output = result.stdout
 
-        # Extract commit metadata
+        output = result.stdout.strip().split("\n")
+
+        if not output:
+            logging.error(f"Commit {commit_sha} has no valid output from git show")
+            return {}
+
+        # Extract commit author
+        author_name = output[0].strip() if output else "Unknown"
+        unique_contributors.add(author_name)  # Track contributor
+
+        # Initialize commit metadata
         total_added = total_removed = tests_added = tests_removed = 0
         src_files = doc_files = other_files = 0
         file_types = set()
+        file_changes = []
 
-        author_line = next((line for line in output.splitlines() if line.startswith("Author:")), None)
-        if author_line:
-            author_name = author_line.split("Author:")[1].strip()
-            unique_contributors.add(author_name)
+        # Process file changes
+        for line in output[1:]:  # Skip author line
+            parts = line.split("\t")
+            if len(parts) != 3:
+                continue  # Skip malformed lines
 
-        for line in output.splitlines():
-            # File change line format: "<filename> | <num> insertions(+), <num> deletions(-)"
-            if "|" in line:
-                parts = line.split("|")
-                filename = parts[0].strip()
-                stats = parts[1].strip()
-                print("filename is : ", filename)
-                print("stats is : ", stats)
+            added_lines, removed_lines, filename = parts
+            added_lines = int(added_lines) if added_lines.isdigit() else 0
+            removed_lines = int(removed_lines) if removed_lines.isdigit() else 0
 
-                # Count the number of '+' and '-' in the stats
-                additions = stats.count('+')
-                deletions = stats.count('-')
+            # Classify files
+            if is_test_file(filename):
+                tests_added += added_lines
+                tests_removed += removed_lines
+            elif is_production_file(filename):
+                total_added += added_lines
+                total_removed += removed_lines
+                src_files += 1
+            elif is_documentation_file(filename):
+                doc_files += 1
+            else:
+                other_files += 1
 
-                # Classify file types
-                if is_test_file(filename):
-                    tests_added += additions
-                    tests_removed += deletions
-                elif is_production_file(filename):
-                    total_added += additions
-                    total_removed += deletions
-                    src_files += 1
-                elif is_documentation_file(filename):
-                    doc_files += 1
-                else:
-                    other_files += 1
+            # Track file extensions
+            file_extension = os.path.splitext(filename)[1]
+            if file_extension:
+                file_types.add(file_extension)
 
-                # Track unique file types
-                file_extension = os.path.splitext(filename)[1]
-                if file_extension:
-                    file_types.add(file_extension)
+            # Store file change data
+            file_changes.append({
+                "file_path": filename,
+                "added_lines": added_lines,
+                "removed_lines": removed_lines
+            })
 
         return {
+            'author': author_name,
             'total_added': total_added,
             'total_removed': total_removed,
             'tests_added': tests_added,
@@ -194,14 +242,17 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
             'doc_files': doc_files,
             'other_files': other_files,
             'file_types': file_types,
+            'file_changes': file_changes  # Store file-level data
         }
 
-    except subprocess.CalledProcessError:
-        logging.error(f"Failed to fetch commit details for {commit_sha}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to fetch commit details for {commit_sha}: {e}")
         return {}
     except Exception as e:
         logging.error(f"Error in fetch_full_commit_data_local: {e}")
         return {}
+
+
 
 
 

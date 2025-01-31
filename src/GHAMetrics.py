@@ -14,9 +14,10 @@ import json
 from log_parser import parse_test_results , identify_test_frameworks_and_count_dependencies , identify_build_language , get_github_actions_log
 from patterns import framework_regex
 from commit_history_analyzer import get_commit_data, get_commit_data_local, clone_repo_locally
-from repo_info_collector import get_repository_languages , get_workflow_ids , count_lines_in_build_yml , get_workflow_all_ids
+from repo_info_collector import get_repository_languages , get_workflow_ids , count_lines_in_workflow_yml , get_workflow_all_ids
 from metrics_aggregator import save_builds_to_file , save_head
 from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml , calculate_description_complexity
+from request_github import get_request
 
 
 import zipfile
@@ -63,29 +64,6 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 console.setFormatter(formatter)
 logging.getLogger('').addHandler(console)
 
-# Use environment variables for sensitive information
-
-
-def get_request(url, token):
-    headers = {'Authorization': f'token {token}'}
-    attempt = 0
-    while attempt < 5:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 403 and 'X-RateLimit-Reset' in response.headers:
-            reset_time = datetime.fromtimestamp(int(response.headers['X-RateLimit-Reset']), timezone.utc)
-            sleep_time = (reset_time - datetime.now(timezone.utc)).total_seconds() + 10
-            logging.error(f"Rate limit exceeded, sleeping for {sleep_time} seconds. URL: {url}")
-            time.sleep(sleep_time)
-        else:
-            logging.error(
-                f"Failed to fetch data, status code: {response.status_code}, URL: {url}, Response: {response.text}")
-            time.sleep(math.pow(2, attempt) * 10)  # Exponential backoff
-        attempt += 1
-    return None
-
-
 
 # Function to analyze test files for test cases/assertions
 
@@ -110,37 +88,100 @@ def fetch_file_content(repo_full_name, path, commit_sha, token):
 
 
 
-def get_team_size_last_three_months(repo_full_name, token):
+import time
+import logging
+from datetime import datetime, timedelta, timezone
+import requests
+
+def get_team_size_last_three_months(repo_full_name, token, commit_cache):
+    """
+    Efficiently fetches the number of unique contributors in the last three months.
+    Uses cached commit data if available, otherwise fetches from GitHub with rate limits in mind.
+    """
     last_commit_url = f"https://api.github.com/repos/{repo_full_name}/commits"
-    headers = {'Authorization': f'token {token}'}
-    response = requests.get(last_commit_url, headers=headers)
-    if response.status_code == 200:
-        last_commit_date = datetime.strptime(response.json()[0]['commit']['committer']['date'], '%Y-%m-%dT%H:%M:%SZ')
-        start_date = last_commit_date - timedelta(days=90)  # Three months prior
-        commits_url = f"{last_commit_url}?since={start_date.isoformat()}Z&until={last_commit_date.isoformat()}Z"
-        committers = set()
+    committers = set()
 
-        while True:
-            response = requests.get(commits_url, headers=headers)
-            if response.status_code == 200:
-                commits_data = response.json()
-                for commit in commits_data:
-                    if commit['committer']:
-                        committers.add(commit['committer']['login'])
+    # Check cached commits before making API requests
+    cached_commits = [commit for commit in commit_cache.cache.keys() if commit.startswith(repo_full_name)]
+    
+    if cached_commits:
+        logging.info(f"Using cached commits for {repo_full_name}")
+        for commit_sha in cached_commits:
+            commit_data = commit_cache.get(commit_sha)
+            if commit_data:
+                committers.add(commit_data.get('author', ''))  # Ensure author login is stored
 
-                # Check if there's another page of commits
-                if 'next' in response.links:
-                    commits_url = response.links['next']['url']
-                else:
-                    break
-            else:
-                logging.error(f"Failed to fetch commits, status code: {response.status_code}")
-                return None
+        if len(committers) > 0:
+            return len(committers)  # Return cached team size if data is available
 
-        return len(committers)
-    else:
-        logging.error(f"Failed to fetch last commit, status code: {response.status_code}")
+    logging.info(f"Fetching commits for {repo_full_name} from GitHub as cache is incomplete.")
+
+    # Get the latest commit date
+    response = get_request(last_commit_url, token)
+    if not response or not isinstance(response, list) or 'commit' not in response[0]:
+        logging.error(f"Failed to fetch commits for {repo_full_name}")
         return None
+
+    last_commit_date = datetime.strptime(response[0]['commit']['committer']['date'], '%Y-%m-%dT%H:%M:%SZ')
+    start_date = last_commit_date - timedelta(days=90)  # Three months prior
+
+    # API request to fetch commits within the last 3 months
+    commits_url = f"{last_commit_url}?since={start_date.isoformat()}Z&until={last_commit_date.isoformat()}Z"
+
+    attempt = 0  # Retry counter
+
+    while commits_url:
+        try:
+            raw_response = requests.get(commits_url, headers={'Authorization': f'token {token}'})
+
+            if raw_response.status_code == 200:
+                response = raw_response.json()  # Convert to JSON list of commits
+
+                for commit in response:
+                    if commit.get('committer') and commit['committer'].get('login'):
+                        committers.add(commit['committer']['login'])
+                        commit_sha = commit.get('sha')
+                        if commit_sha:
+                            commit_cache.put(f"{repo_full_name}-{commit_sha}", {"author": commit['committer']['login']})
+
+                # Extract the next page URL from headers
+                link_header = raw_response.headers.get('Link', '')
+                commits_url = None  # Default to None, if no pagination exists
+                if link_header:
+                    links = {rel.split(";")[1].strip(): rel.split(";")[0].strip("<>") for rel in link_header.split(",")}
+                    if 'rel="next"' in links:
+                        commits_url = links['rel="next"']
+
+                attempt = 0  # Reset attempt counter after a successful request
+
+            elif raw_response.status_code == 403 and 'X-RateLimit-Reset' in raw_response.headers:
+                # Handle GitHub rate limits
+                reset_time = datetime.fromtimestamp(int(raw_response.headers['X-RateLimit-Reset']), timezone.utc)
+                sleep_time = (reset_time - datetime.now(timezone.utc)).total_seconds() + 10
+                logging.warning(f"Rate limit exceeded, sleeping for {sleep_time:.2f} seconds before retrying.")
+                time.sleep(sleep_time)
+
+            else:
+                logging.error(f"Failed to fetch commits, status code: {raw_response.status_code}")
+                attempt += 1
+                time.sleep(min(2 ** attempt, 60))  # Exponential backoff (max 60s)
+
+                if attempt > 5:  # Maximum retries
+                    logging.error("Max retries reached, aborting commit fetch.")
+                    break
+
+        except requests.RequestException as e:
+            logging.error(f"Error fetching commits: {e}")
+            attempt += 1
+            time.sleep(min(2 ** attempt, 60))  # Exponential backoff (max 60s)
+
+            if attempt > 5:
+                logging.error("Max retries reached due to request errors, aborting commit fetch.")
+                break
+
+    return len(committers)
+
+
 
 
 
@@ -205,7 +246,6 @@ def count_commits_on_files(repo_full_name, files, token, last_commit_date):
 
 
 
-
 # get all files in the root of a repository
 def get_github_repo_files(owner, repo, token=None):
     """
@@ -223,11 +263,10 @@ def get_github_repo_files(owner, repo, token=None):
 # end new functions
 
 def get_builds_info(repo_full_name, token, output_csv, framework_regex):
-    local_repo_path = f"/tmp/{repo_full_name.replace('/', '_')}.git"
+    base_path = os.path.dirname(os.path.abspath(__file__))  # Get project folder path
+    
     repo_url = f"https://github.com/{repo_full_name}.git"
-
-    # Clone the repository only once at the start
-    clone_repo_locally(repo_url, local_repo_path)
+    local_repo_path = clone_repo_locally(repo_url, base_path)
 
     # Read the configuration from config.json
     try:
@@ -245,29 +284,34 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
         build_workflow_ids = get_workflow_ids(repo_full_name, token)
 
     languages = get_repository_languages(repo_full_name, token)
-    gh_team_size = get_team_size_last_three_months(repo_full_name, token)
+    commit_cache = LRUCache(capacity=10000)
+    gh_team_size = get_team_size_last_three_months(repo_full_name, token, commit_cache)
     repo_files = get_github_repo_files(repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
     build_language = identify_build_language(repo_files)
-    test_frameworks, dependency_count = identify_test_frameworks_and_count_dependencies(repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
+    test_frameworks, dependency_count = identify_test_frameworks_and_count_dependencies(
+        repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1], token
+    )
     unique_builds = set()
-    commit_cache = LRUCache(capacity=10000)
     last_end_date = None  # Initialize to track end date of each build
 
     # Initialize a set to track unique contributors up to each commit
     unique_contributors = set()
 
-    # Dictionary to map workflow IDs to their names
-    workflow_names = {}
-
     if not build_workflow_ids:
         logging.error("No workflows found.")
         return
 
-    # Fetch workflow names and map them to IDs
-    workflows_response = get_request(f"https://api.github.com/repos/{repo_full_name}/actions/workflows", token)
-    if workflows_response and 'workflows' in workflows_response:
-        for workflow in workflows_response['workflows']:
-            workflow_names[workflow['id']] = workflow['name']
+    workflow_files = {}  # Stores {workflow_id: (workflow_name, file_path)}
+
+    for workflow_id in build_workflow_ids:
+        workflow_info_url = f"https://api.github.com/repos/{repo_full_name}/actions/workflows/{workflow_id}"
+        workflow_info = get_request(workflow_info_url, token)
+
+        if workflow_info and 'name' in workflow_info and 'path' in workflow_info:
+            workflow_files[workflow_id] = (workflow_info['name'], workflow_info['path'])  # Store tuple (name, path)
+        else:
+            workflow_files[workflow_id] = ("Unknown Workflow", "unknown_workflow.yml")  # Fallback
+
 
     for workflow_id in build_workflow_ids:
         total_builds = 0
@@ -290,11 +334,17 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
 
                     commit_sha = run['head_sha']
                     until_date = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
-                    # Pass the unique_contributors set to be updated within get_commit_data_local
-                    commit_data = get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors)
+                    
+                    # Fetch correct workflow file name from mapped workflow IDs
+                    workflow_name, workflow_filename = workflow_files.get(workflow_id, ("Unknown Workflow", "unknown_workflow.yml"))
 
-                    # Fetch line count of build.yml file at the specific commit
-                    workflow_size = count_lines_in_build_yml(repo_full_name, commit_sha, token)
+                    # Pass the unique_contributors set to be updated within get_commit_data_local
+                    commit_data = get_commit_data_local(
+                        commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors
+                    )
+
+                    # Fetch line count of the correct workflow YAML file at the specific commit
+                    workflow_size = count_lines_in_workflow_yml(repo_full_name, workflow_filename, commit_sha, token)
 
                     # Compile the build info, using the length of unique_contributors here
                     build_info = compile_build_info(
@@ -304,7 +354,7 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
                     )
 
                     # Add workflow name to build info
-                    build_info['workflow_name'] = workflow_names.get(workflow_id, "Unknown")
+                    build_info['workflow_name'] = workflow_name  # Use actual workflow name
 
                     duration_to_fetch = time.time() - start_time
                     build_info['fetch_duration'] = duration_to_fetch  # Add the duration as a new field
@@ -321,6 +371,18 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
                 page += 1
             else:
                 break
+
+    # Process repository...
+    logging.info(f"Finished processing {repo_full_name}. Cleaning up...")
+
+    # Delete cloned repository
+    if os.path.exists(local_repo_path):
+        shutil.rmtree(local_repo_path, ignore_errors=True)
+        logging.info(f"Deleted temporary repository: {local_repo_path}")
+
+    # Sleep to avoid hitting API limits
+    time.sleep(15)  # Prevent token exhaustion
+
 
     # Reset unique contributors after processing each repository
     unique_contributors.clear()
