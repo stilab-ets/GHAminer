@@ -10,6 +10,7 @@ import re
 from collections import OrderedDict
 import argparse
 import json
+import shutil
 
 from log_parser import parse_test_results , identify_test_frameworks_and_count_dependencies , identify_build_language , get_github_actions_log
 from patterns import framework_regex
@@ -18,6 +19,7 @@ from repo_info_collector import get_repository_languages , get_workflow_ids , co
 from metrics_aggregator import save_builds_to_file , save_head
 from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml , calculate_description_complexity
 from request_github import get_request
+import numpy as np
 
 
 import zipfile
@@ -67,24 +69,40 @@ logging.getLogger('').addHandler(console)
 
 # Function to analyze test files for test cases/assertions
 
+import requests
+import base64
+import logging
+
 def fetch_file_content(repo_full_name, path, commit_sha, token):
+    """
+    Fetch the content of a file from a GitHub repository at a specific commit.
+    If the file does not exist, return None instead of stopping execution.
+    """
+    if not path or path.strip() == "":
+        return None  # Skip if path is empty
+
     url = f"https://api.github.com/repos/{repo_full_name}/contents/{path}?ref={commit_sha}"
     headers = {'Authorization': f'token {token}'}
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        file_data = response.json()
-        # Files are base64 encoded by GitHub, so decode them
-        if 'content' in file_data:
-            try:
-                return base64.b64decode(file_data['content']).decode('utf-8')
-            except UnicodeDecodeError:
-                logging.error(f"Binary file detected and skipped: {path} at commit {commit_sha}")
-                return ""  # Return empty string if binary file detected
+    
+    try:
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 200:
+            file_data = response.json()
+            if 'content' in file_data:
+                try:
+                    return base64.b64decode(file_data['content']).decode('utf-8')
+                except UnicodeDecodeError:
+                    return None  # Return None if file is binary
+            else:
+                return None  # Return None if content is missing
+        elif response.status_code == 404:
+            return None  # Return None if file not found
         else:
-            logging.error(f"No content found in {path} at commit {commit_sha}")
-    else:
-        logging.error(f"Failed to fetch file content: {response.status_code}, URL: {url}")
-    return ""  # Return empty string if there is an error fetching the file
+            return None  # Return None for other errors
+    except requests.exceptions.RequestException:
+        return None  # Return None for network-related issues
+
 
 
 
@@ -260,28 +278,40 @@ def get_github_repo_files(owner, repo, token=None):
 
 
 
-# end new functions
+import pandas as pd
+
+import pandas as pd
+import os
+import numpy as np
+from datetime import datetime
+import logging
+
+def get_existing_build_ids(repo_full_name, output_csv):
+    """
+    Read the CSV file and return a set of existing build IDs for the given repo.
+    This ensures we only fetch new builds.
+    """
+    if not os.path.exists(output_csv):
+        return set()  # If file doesn't exist, process from scratch
+
+    try:
+        df = pd.read_csv(output_csv, usecols=['repo', 'id_build'])
+        df = df[df['repo'] == repo_full_name]
+        return set(df['id_build'].astype(str))  # Store existing IDs as strings for consistency
+    except Exception as e:
+        logging.error(f"Error reading existing build IDs from {output_csv}: {e}")
+        return set()
 
 def get_builds_info(repo_full_name, token, output_csv, framework_regex):
     base_path = os.path.dirname(os.path.abspath(__file__))  # Get project folder path
-    
     repo_url = f"https://github.com/{repo_full_name}.git"
     local_repo_path = clone_repo_locally(repo_url, base_path)
 
-    # Read the configuration from config.json
-    try:
-        with open("config.json", "r") as config_file:
-            config = json.load(config_file)
-        fetch_all_workflows = config.get("fetch_all_workflows", True)  # Default to True
-    except FileNotFoundError:
-        logging.warning("config.json not found. Defaulting to fetching all workflows.")
-        fetch_all_workflows = True
+    # Get already recorded build IDs
+    existing_build_ids = get_existing_build_ids(repo_full_name, output_csv)
 
-    # Call the appropriate function based on the configuration
-    if fetch_all_workflows:
-        build_workflow_ids = get_workflow_all_ids(repo_full_name, token)
-    else:
-        build_workflow_ids = get_workflow_ids(repo_full_name, token)
+    # Fetch all workflows
+    build_workflow_ids = get_workflow_all_ids(repo_full_name, token)
 
     languages = get_repository_languages(repo_full_name, token)
     commit_cache = LRUCache(capacity=10000)
@@ -291,88 +321,87 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
     test_frameworks, dependency_count = identify_test_frameworks_and_count_dependencies(
         repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1], token
     )
-    unique_builds = set()
-    last_end_date = None  # Initialize to track end date of each build
-
-    # Initialize a set to track unique contributors up to each commit
+    last_end_date = None
     unique_contributors = set()
-
-    if not build_workflow_ids:
-        logging.error("No workflows found.")
-        return
-
-    workflow_files = {}  # Stores {workflow_id: (workflow_name, file_path)}
-
-    for workflow_id in build_workflow_ids:
-        workflow_info_url = f"https://api.github.com/repos/{repo_full_name}/actions/workflows/{workflow_id}"
-        workflow_info = get_request(workflow_info_url, token)
-
-        if workflow_info and 'name' in workflow_info and 'path' in workflow_info:
-            workflow_files[workflow_id] = (workflow_info['name'], workflow_info['path'])  # Store tuple (name, path)
-        else:
-            workflow_files[workflow_id] = ("Unknown Workflow", "unknown_workflow.yml")  # Fallback
 
 
     for workflow_id in build_workflow_ids:
         total_builds = 0
         page = 1
-        sloc, test = 0, 0
+
         while True:
             api_url = f"https://api.github.com/repos/{repo_full_name}/actions/workflows/{workflow_id}/runs?page={page}&per_page=100"
-            response_data = get_request(api_url, token)
-            if response_data and 'workflow_runs' in response_data:
+            response = requests.get(api_url, headers={'Authorization': f'token {token}'})  # Make request
+
+            if response.status_code != 200:
+                logging.error(f"Failed to fetch builds for {repo_full_name} (workflow: {workflow_id}, page: {page}), status: {response.status_code}")
+                break  # Stop if request fails
+
+            response_data = response.json()
+            time.sleep(3)
+
+            if 'workflow_runs' in response_data and response_data['workflow_runs']:
                 builds_info = []
-                for run in response_data['workflow_runs'][::-1]:
-                    run_id = run['id']
-                    if run_id in unique_builds:
-                        logging.info(f"Skipping duplicate build {run_id}")
-                        continue
-                    unique_builds.add(run_id)
+                workflow_runs = response_data['workflow_runs'][::-1]  # Oldest to newest
+
+                for run in workflow_runs:
+                    run_id = str(run['id'])  # Convert ID to string for consistency
+
+                    if run_id in existing_build_ids:
+                        logging.info(f"Skipping existing build {run_id}")
+                        continue  # Skip already processed builds
+
+                    # If it's a new build, process it
+                    existing_build_ids.add(run_id)
                     total_builds += 1
 
                     start_time = time.time()
 
                     commit_sha = run['head_sha']
                     until_date = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
-                    
-                    # Fetch correct workflow file name from mapped workflow IDs
-                    workflow_name, workflow_filename = workflow_files.get(workflow_id, ("Unknown Workflow", "unknown_workflow.yml"))
 
-                    # Pass the unique_contributors set to be updated within get_commit_data_local
+                    workflow_name = run.get('name', 'Unknown Workflow')
+                    workflow_filename = run.get('path', 'unknown_workflow.yml')
+
+                    # Pass unique_contributors set to be updated within get_commit_data_local
                     commit_data = get_commit_data_local(
                         commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors
                     )
 
-                    # Fetch line count of the correct workflow YAML file at the specific commit
+                    # Fetch line count of the workflow YAML file
                     workflow_size = count_lines_in_workflow_yml(repo_full_name, workflow_filename, commit_sha, token)
+                    if workflow_size is None:
+                        workflow_size = None  # Ensure NaN is recorded
 
-                    # Compile the build info, using the length of unique_contributors here
+                    # Compile the build info
                     build_info = compile_build_info(
                         run, repo_full_name, commit_data, commit_sha, languages,
                         len(unique_contributors), total_builds,
                         gh_team_size, build_language, test_frameworks, dependency_count, workflow_size, framework_regex
                     )
 
-                    # Add workflow name to build info
                     build_info['workflow_name'] = workflow_name  # Use actual workflow name
 
                     duration_to_fetch = time.time() - start_time
-                    build_info['fetch_duration'] = duration_to_fetch  # Add the duration as a new field
-                    builds_info.clear()
+                    build_info['fetch_duration'] = duration_to_fetch  # Add fetch duration
                     builds_info.append(build_info)
+
                     save_builds_to_file(builds_info, output_csv)
 
-                    # Update last_end_date to the end time of this build
                     last_end_date = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
 
                 logging.info(f"Processed page {page} of builds for workflow {workflow_id}")
-                if 'next' not in response_data.get('links', {}):
-                    break
+
+            else:
+                logging.info(f"No workflow runs found on page {page} for workflow {workflow_id}.")
+                break  # Stop if no more data
+
+            # **Fix Pagination Handling**
+            if 'next' in response.headers.get('Link', ''):
                 page += 1
             else:
-                break
+                break  # No more pages left
 
-    # Process repository...
     logging.info(f"Finished processing {repo_full_name}. Cleaning up...")
 
     # Delete cloned repository
@@ -380,12 +409,10 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
         shutil.rmtree(local_repo_path, ignore_errors=True)
         logging.info(f"Deleted temporary repository: {local_repo_path}")
 
-    # Sleep to avoid hitting API limits
     time.sleep(15)  # Prevent token exhaustion
-
-
-    # Reset unique contributors after processing each repository
     unique_contributors.clear()
+
+
 
 
 

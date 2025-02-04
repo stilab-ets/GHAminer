@@ -6,32 +6,38 @@ import math
 import base64
 from request_github import get_request
 
+import base64
+import logging
+
+import numpy as np  # Import numpy for NaN
 
 def count_lines_in_workflow_yml(repo_full_name, workflow_path, commit_sha, token):
     """
     Fetch the workflow YAML file content at a specific commit SHA and count its lines.
-    Uses get_request to handle rate limits and retries properly.
+    If the file is missing, returns np.nan instead of stopping execution.
     """
+    if not workflow_path or workflow_path.strip() == "":
+        return None  # Return NaN if path is empty
+
     url = f"https://api.github.com/repos/{repo_full_name}/contents/{workflow_path}?ref={commit_sha}"
 
     try:
         response = get_request(url, token)
+
         if response and 'content' in response:
             try:
-                # Decode Base64 content, split by lines, and count
                 content = base64.b64decode(response['content']).decode('utf-8')
-                line_count = len(content.splitlines())
-                print(f"Length of content of {workflow_path}: {line_count}")
-                return line_count
-            except base64.binascii.Error as decode_err:
-                logging.error(f"Error decoding {workflow_path} at commit {commit_sha}: {decode_err}")
-                return 0
+                return len(content.splitlines())  # Return line count
+            except (base64.binascii.Error, UnicodeDecodeError):
+                return np.nan  # Return NaN if file is binary or unreadable
+        elif response and response.get('message') == 'Not Found':
+            return None  # Return NaN if file is not found
         else:
-            logging.error(f"No content found in {workflow_path} at commit {commit_sha}")
-    except Exception as err:
-        logging.error(f"Unexpected error fetching {workflow_path} at commit {commit_sha}: {err}")
+            return None # Return NaN for other errors
+    except Exception:
+        return None  # Return NaN if there's an unexpected error
 
-    return 0  # Return 0 if there's an issue with fetching or decoding
+
 
 
 
