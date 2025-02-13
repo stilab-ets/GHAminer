@@ -14,7 +14,7 @@ import shutil
 
 from log_parser import parse_test_results , identify_test_frameworks_and_count_dependencies , identify_build_language , get_github_actions_log
 from patterns import framework_regex
-from commit_history_analyzer import get_commit_data, get_commit_data_local, clone_repo_locally
+from commit_history_analyzer import get_commit_data_local, clone_repo_locally
 from repo_info_collector import get_repository_languages , get_workflow_ids , count_lines_in_workflow_yml , get_workflow_all_ids
 from metrics_aggregator import save_builds_to_file , save_head
 from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml , calculate_description_complexity
@@ -234,36 +234,6 @@ def fetch_run_details(run_id, repo_full_name, token):
 
 
 
-def count_commits_on_files(repo_full_name, files, token, last_commit_date):
-    unique_commits = set()
-    headers = {'Authorization': f'token {token}'}
-    end_date = last_commit_date
-    start_date = end_date - timedelta(days=90)
-
-    for file in files:
-        commits_url = f"https://api.github.com/repos/{repo_full_name}/commits?path={file['filename']}&since={start_date.isoformat()}Z&until={end_date.isoformat()}Z"
-        while True:
-            response = requests.get(commits_url, headers=headers)
-            if response.status_code == 200:
-                commits_data = response.json()
-                for commit in commits_data:
-                    unique_commits.add(commit['sha'])
-
-                if 'next' in response.links:
-                    commits_url = response.links['next']['url']
-                else:
-                    break
-            else:
-                logging.error(
-                    f"Failed to fetch commits for file {file['filename']}, status code: {response.status_code}, response: {response.text}")
-                break
-
-    return len(unique_commits)
-
-
-
-
-
 # get all files in the root of a repository
 def get_github_repo_files(owner, repo, token=None):
     """
@@ -373,17 +343,20 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
                     if workflow_size is None:
                         workflow_size = None  # Ensure NaN is recorded
 
+
+
+                    #build_info['workflow_name'] = workflow_name  # Use actual workflow name
+
+                    duration_to_fetch = time.time() - start_time
+                    #build_info['fetch_duration'] = duration_to_fetch  # Add fetch duration
+
+
                     # Compile the build info
                     build_info = compile_build_info(
                         run, repo_full_name, commit_data, commit_sha, languages,
                         len(unique_contributors), total_builds,
-                        gh_team_size, build_language, test_frameworks, dependency_count, workflow_size, framework_regex
+                        gh_team_size, build_language, test_frameworks, dependency_count, workflow_size, framework_regex ,workflow_name, duration_to_fetch
                     )
-
-                    build_info['workflow_name'] = workflow_name  # Use actual workflow name
-
-                    duration_to_fetch = time.time() - start_time
-                    build_info['fetch_duration'] = duration_to_fetch  # Add fetch duration
                     builds_info.append(build_info)
 
                     save_builds_to_file(builds_info, output_csv)
@@ -421,7 +394,7 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
 
 
 def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, number_of_committers, total_builds, gh_team_size,
-                       build_language, test_frameworks , dependency_count , workflow_size , framework_regex):
+                       build_language, test_frameworks , dependency_count , workflow_size , framework_regex , workflow_name, duration_to_fetch):
     # Parsing build start and end times
     start_time = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
     end_time = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
@@ -482,7 +455,6 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'id_build': run['id'],
         'branch': run['head_branch'],
         'commit_sha': commit_sha,
-        'workflow_name': "Unknown",
         'languages': languages,
         'status': run['status'],
         'conclusion': run['conclusion'],
@@ -491,7 +463,22 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'build_duration': duration,
         'total_builds': total_builds,
         'tests_ran': tests_ran,
+        'gh_files_added': commit_data.get('gh_files_added', 0),
+        'gh_files_deleted': commit_data.get('gh_files_deleted', 0),
+        'gh_files_modified': commit_data.get('gh_files_modified', 0),
+        'file_types': commit_data.get('file_types', []),
+        'gh_lines_added': commit_data.get('gh_lines_added', 0),
+        'gh_lines_deleted': commit_data.get('gh_lines_deleted', 0),
         'gh_src_churn': commit_data.get('gh_src_churn', 0),
+        'gh_tests_added': commit_data.get('gh_tests_added', 0),
+        'gh_tests_deleted': commit_data.get('gh_tests_deleted', 0),
+        'gh_test_churn': commit_data.get('gh_test_churn', 0),
+        'gh_sloc': commit_data.get('gh_sloc', 0),
+        'gh_src_files': commit_data.get('gh_src_files', 0),
+        'gh_doc_files': commit_data.get('gh_doc_files', 0),
+        'gh_other_files': commit_data.get('gh_other_files', 0),
+        'gh_commits_on_files_touched': commit_data.get('gh_commits_on_files_touched', 0),
+        'gh_test_lines_per_kloc': commit_data.get('gh_test_lines_per_kloc', 0),
         'gh_pull_req_number': pr_number,
         'gh_is_pr': gh_is_pr,
         'gh_num_pr_comments': pr_comments_count,
@@ -509,11 +496,13 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'tests_passed': cumulative_test_results['passed'],
         'tests_failed': cumulative_test_results['failed'],
         'tests_skipped': cumulative_test_results['skipped'],
-        'tests_total': cumulative_test_results['total']
+        'tests_total': cumulative_test_results['total'],
+        'workflow_name' : workflow_name,
+        'fetch_duration' : duration_to_fetch
     }
 
     # Add additional data from commit_data
-    build_info.update(commit_data)
+    #build_info.update(commit_data)
 
     return build_info
 
