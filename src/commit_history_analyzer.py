@@ -108,28 +108,40 @@ def get_last_commit_containing_file(file_path, commit_sha, local_repo_path):
         return None  # File has no prior history
 
 def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributors):
-    """Fetch detailed commit data using local Git instead of GitHub API, including accurate files added, deleted, and modified."""
+    """Fetch detailed commit data using local Git, ensuring the commit exists before retrieving details."""
     try:
         if not os.path.exists(local_repo_path):
             logging.error(f"Repository path does not exist: {local_repo_path}")
             return {}
 
-        # Get commit details (author name and changed files)
+        # **Ensure the commit exists locally by fetching it explicitly**
+        fetch_result = subprocess.run(
+            ["git", "-C", local_repo_path, "fetch", "origin", commit_sha],
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+        if fetch_result.returncode != 0:
+            logging.warning(f"Failed to fetch commit {commit_sha}: {fetch_result.stderr.strip()}")
+
+        # **Try to show commit details**
         result = subprocess.run(
             ["git", "-C", local_repo_path, "show", "--numstat", "--pretty=format:%an", commit_sha],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", check=True
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
+
+        if result.returncode != 0:
+            logging.error(f"Failed to fetch commit details for {commit_sha}: {result.stderr.strip()}")
+            return {}
 
         output = result.stdout.strip().split("\n")
         if not output:
             logging.error(f"Commit {commit_sha} has no valid output from git show")
             return {}
 
-        # Extract commit author
+        # **Extract commit author**
         author_name = output[0].strip() if output else "Unknown"
         unique_contributors.add(author_name)
 
-        # Initialize commit metadata
+        # **Initialize commit metadata**
         total_added = total_removed = tests_added = tests_removed = 0
         src_files = doc_files = other_files = 0
         file_types = set()
@@ -139,7 +151,7 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
         unique_files_deleted = set()
         unique_files_modified = set()
 
-        # Process file changes
+        # **Process file changes**
         for line in output[1:]:  # Skip author line
             parts = line.split("\t")
             if len(parts) != 3:
@@ -149,37 +161,33 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
             added_lines = int(added_lines) if added_lines.isdigit() else 0
             removed_lines = int(removed_lines) if removed_lines.isdigit() else 0
 
-            # Track total added/removed lines
+            # **Track total added/removed lines**
             total_added += added_lines
             total_removed += removed_lines
 
-            # Get previous commit SHA (parent of current commit)
-            parent_commit = subprocess.run(
+            # **Get previous commit SHA (parent of current commit)**
+            parent_commit_result = subprocess.run(
                 ["git", "-C", local_repo_path, "rev-parse", f"{commit_sha}^"],
                 capture_output=True, text=True, encoding="utf-8", errors="replace"
-            ).stdout.strip()
+            )
+            parent_commit = parent_commit_result.stdout.strip() if parent_commit_result.returncode == 0 else None
 
-            # Get file line count at the parent commit (before the change)
-            prev_line_count = get_file_line_count(parent_commit, filename, local_repo_path)
-
-            # Get file line count at the current commit (after the change)
+            # **Determine file status more accurately**
+            prev_line_count = get_file_line_count(parent_commit, filename, local_repo_path) if parent_commit else None
             current_line_count = get_file_line_count(commit_sha, filename, local_repo_path)
 
-            # **Fix for Deleted Files**:
-            # If the file was removed, try to get its last known commit
             if prev_line_count is None and removed_lines > 0:
                 last_known_commit = get_last_commit_containing_file(filename, commit_sha, local_repo_path)
                 prev_line_count = get_file_line_count(last_known_commit, filename, local_repo_path)
 
-            # Determine file status more accurately
             if prev_line_count is None and current_line_count is not None:
-                unique_files_added.add(filename)  # File was newly created
+                unique_files_added.add(filename)
             elif prev_line_count is not None and current_line_count is None:
-                unique_files_deleted.add(filename)  # File was entirely removed
+                unique_files_deleted.add(filename)
             else:
-                unique_files_modified.add(filename)  # File was modified
+                unique_files_modified.add(filename)
 
-            # Classify files
+            # **Classify files**
             if is_test_file(filename):
                 tests_added += added_lines
                 tests_removed += removed_lines
@@ -190,12 +198,12 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
             else:
                 other_files += 1
 
-            # Track file extensions
+            # **Track file extensions**
             file_extension = os.path.splitext(filename)[1]
             if file_extension:
                 file_types.add(file_extension)
 
-            # Store file change data
+            # **Store file change data**
             file_changes.append({
                 "file_path": filename,
                 "added_lines": added_lines,
@@ -212,7 +220,7 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
             'doc_files': doc_files,
             'other_files': other_files,
             'file_types': file_types,
-            'file_changes': file_changes,  # Store file-level data
+            'file_changes': file_changes,
             'gh_files_added': len(unique_files_added),
             'gh_files_deleted': len(unique_files_deleted),
             'gh_files_modified': len(unique_files_modified),
@@ -233,8 +241,8 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
 
 def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors):
     """
-    Aggregates commit-related information, including accurate number of unique files added, deleted, and modified
-    between two workflow runs.
+    Aggregates commit-related information, ensuring the run's commit_sha is always included,
+    along with commits between the last run's end date and this run's creation date.
     """
     # Initialize aggregated metrics
     total_added = total_removed = tests_added = tests_removed = 0
@@ -245,6 +253,9 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
     unique_files_added = 0
     unique_files_deleted = 0
     unique_files_modified = 0
+
+    # **Ensure commit_sha is always included**
+    commit_shas = [commit_sha]  # Start with the head commit of the run
 
     # **Extract commits in the range**
     if last_end_date is None:
@@ -263,52 +274,57 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
 
     try:
         result = subprocess.run(git_log_command, capture_output=True, text=True, check=True)
-        commit_shas = result.stdout.splitlines()
+        additional_commits = result.stdout.splitlines()
 
-        # **Iterate over each commit to track file changes**
-        for commit_sha in commit_shas:
-            # Check cache to avoid redundant calls
-            cached_data = commit_cache.get(commit_sha)
-            if cached_data:
-                total_added += cached_data['total_added']
-                total_removed += cached_data['total_removed']
-                tests_added += cached_data['tests_added']
-                tests_removed += cached_data['tests_removed']
-                src_files += cached_data['src_files']
-                doc_files += cached_data['doc_files']
-                other_files += cached_data['other_files']
-                file_types.update(cached_data['file_types'])
-                commits_on_files_touched.add(commit_sha)
-
-                unique_files_added += commit_full_data['gh_files_added']
-                unique_files_deleted += commit_full_data['gh_files_deleted']
-                unique_files_modified += commit_full_data['gh_files_modified']
-
-                continue  # Skip redundant processing
-
-            # **Get detailed file changes for this commit**
-            commit_full_data = fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributors)
-            if commit_full_data:
-                commits_on_files_touched.add(commit_sha)
-                total_added += commit_full_data['total_added']
-                total_removed += commit_full_data['total_removed']
-                tests_added += commit_full_data['tests_added']
-                tests_removed += commit_full_data['tests_removed']
-                src_files += commit_full_data['src_files']
-                doc_files += commit_full_data['doc_files']
-                other_files += commit_full_data['other_files']
-                file_types.update(commit_full_data['file_types'])
-
-                # Aggregate unique file changes
-                unique_files_added += commit_full_data['gh_files_added']
-                unique_files_deleted += commit_full_data['gh_files_deleted']
-                unique_files_modified += commit_full_data['gh_files_modified']
-
-                # Cache the commit data for efficiency
-                commit_cache.put(commit_sha, commit_full_data)
+        # **Ensure commit_sha is at the beginning of the list**
+        for sha in additional_commits:
+            if sha not in commit_shas:
+                commit_shas.append(sha)
 
     except subprocess.CalledProcessError as e:
         logging.error(f"Error running git log for {local_repo_path}: {e}")
+
+    # **Process each commit, ensuring commit_sha is processed first**
+    for sha in commit_shas:
+        # Check cache to avoid redundant calls
+        cached_data = commit_cache.get(sha)
+        if cached_data:
+            total_added += cached_data['total_added']
+            total_removed += cached_data['total_removed']
+            tests_added += cached_data['tests_added']
+            tests_removed += cached_data['tests_removed']
+            src_files += cached_data['src_files']
+            doc_files += cached_data['doc_files']
+            other_files += cached_data['other_files']
+            file_types.update(cached_data['file_types'])
+            commits_on_files_touched.add(sha)
+
+            unique_files_added += cached_data['gh_files_added']
+            unique_files_deleted += cached_data['gh_files_deleted']
+            unique_files_modified += cached_data['gh_files_modified']
+
+            continue  # Skip redundant processing
+
+        # **Get detailed file changes for this commit**
+        commit_full_data = fetch_full_commit_data_local(sha, local_repo_path, unique_contributors)
+        if commit_full_data:
+            commits_on_files_touched.add(sha)
+            total_added += commit_full_data['total_added']
+            total_removed += commit_full_data['total_removed']
+            tests_added += commit_full_data['tests_added']
+            tests_removed += commit_full_data['tests_removed']
+            src_files += commit_full_data['src_files']
+            doc_files += commit_full_data['doc_files']
+            other_files += commit_full_data['other_files']
+            file_types.update(commit_full_data['file_types'])
+
+            # Aggregate unique file changes
+            unique_files_added += commit_full_data['gh_files_added']
+            unique_files_deleted += commit_full_data['gh_files_deleted']
+            unique_files_modified += commit_full_data['gh_files_modified']
+
+            # Cache the commit data for efficiency
+            commit_cache.put(sha, commit_full_data)
 
     # **Return aggregated commit data**
     return {

@@ -25,7 +25,7 @@ import numpy as np
 import zipfile
 import io
 
-github_token = 'your_github_token_here'  
+github_token = 'your_token_here'  
 output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
