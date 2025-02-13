@@ -25,7 +25,7 @@ import numpy as np
 import zipfile
 import io
 
-github_token = 'your_token_here'  
+github_token = 'your_github_token_here'  
 output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
@@ -205,20 +205,32 @@ def get_team_size_last_three_months(repo_full_name, token, commit_cache):
 
 
 
-def fetch_pull_request_details(repo_full_name, pr_number, token):
-    """Fetch pull request details including the merge commit SHA if merged."""
-    pr_url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}"
-    pr_response = get_request(pr_url, token)
+def fetch_pull_request_details(repo_full_name, commit_sha, token):
+    """Fetch pull request details including PR number and merge commit SHA."""
+    # Get PRs that contain this commit
+    pr_search_url = f"https://api.github.com/repos/{repo_full_name}/commits/{commit_sha}/pulls"
+    pr_response = get_request(pr_search_url, token)
+
     if pr_response:
-        # Fetches merge commit SHA from the pull request details if it exists
-        pr_details = {
-            'title': pr_response.get('title', ''),
-            'body': pr_response.get('body', ''),
-            'comments_count': pr_response.get('comments', 0),  # Number of comments
-            'merge_commit_sha': pr_response.get('merge_commit_sha', None)  # SHA of the merge commit if PR is merged
-        }
-        return pr_details
-    return {}
+        if isinstance(pr_response, list) and len(pr_response) > 0:
+            # Take the first PR found (usually the correct one)
+            pr_info = pr_response[0]
+            return {
+                'gh_pull_req_number': pr_info.get('number', 0),
+                'gh_is_pr': True,
+                'gh_num_pr_comments': pr_info.get('comments', 0),
+                'git_merged_with': pr_info.get('merge_commit_sha', None),
+                'gh_description_complexity': calculate_description_complexity(pr_info),
+            }
+
+    return {
+        'gh_pull_req_number': 0,
+        'gh_is_pr': False,
+        'gh_num_pr_comments': 0,
+        'git_merged_with': None,
+        'gh_description_complexity': 0,
+    }
+
 
 
 def fetch_run_details(run_id, repo_full_name, token):
@@ -427,23 +439,8 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         print(f"Failed to unzip log file for build {run['id']}")
     ### END OF NEWLY ADDED CODE #######################################################
 
-    # Initialize default values
-    pr_number = 0
-    description_complexity = 0
-    pr_comments_count = 0
-    merge_commit_sha = None  # Initialize merge commit SHA
-
-    # Check if the build was triggered by a pull request
-    gh_is_pr = run['event'] == 'pull_request' and len(run['pull_requests']) > 0
-    if gh_is_pr:
-        if 'pull_requests' in run and run['pull_requests']:
-            pr_number = run['pull_requests'][0]['number']
-            if pr_number:
-                pr_details = fetch_pull_request_details(repo_full_name, pr_number, github_token)
-                if pr_details:
-                    description_complexity = calculate_description_complexity(pr_details)
-                    pr_comments_count = pr_details.get('comments_count', 0)
-                    merge_commit_sha = pr_details.get('merge_commit_sha', None)
+    # Check if this build is PR-related
+    pr_details = fetch_pull_request_details(repo_full_name, commit_sha, github_token)
 
     # Determine if tests ran by checking 'steps' in each job
     run_details = fetch_run_details(run['id'], repo_full_name, github_token)
@@ -479,11 +476,14 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'gh_other_files': commit_data.get('gh_other_files', 0),
         'gh_commits_on_files_touched': commit_data.get('gh_commits_on_files_touched', 0),
         'gh_test_lines_per_kloc': commit_data.get('gh_test_lines_per_kloc', 0),
-        'gh_pull_req_number': pr_number,
-        'gh_is_pr': gh_is_pr,
-        'gh_num_pr_comments': pr_comments_count,
-        'git_merged_with': merge_commit_sha,
-        'gh_description_complexity': description_complexity,
+
+        # **Updated PR-related fields**
+        'gh_pull_req_number': pr_details['gh_pull_req_number'],
+        'gh_is_pr': pr_details['gh_is_pr'],
+        'gh_num_pr_comments': pr_details['gh_num_pr_comments'],
+        'git_merged_with': pr_details['git_merged_with'],
+        'gh_description_complexity': pr_details['gh_description_complexity'],
+
         'git_num_committers': number_of_committers,
         'gh_job_id': jobs_ids,
         'total_jobs': job_count,
