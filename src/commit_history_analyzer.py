@@ -146,6 +146,9 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
         src_files = doc_files = other_files = 0
         file_types = set()
         file_changes = []
+        dockerfile_changed = 0
+        docker_compose_changed = 0
+
 
         unique_files_added = set()
         unique_files_deleted = set()
@@ -198,6 +201,13 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
             else:
                 other_files += 1
 
+            # Count Docker-related files
+            if "dockerfile" in filename.lower():
+                dockerfile_changed += 1
+            elif "docker-compose" in filename.lower():
+                docker_compose_changed += 1
+
+
             # **Track file extensions**
             file_extension = os.path.splitext(filename)[1]
             if file_extension:
@@ -224,6 +234,8 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
             'gh_files_added': len(unique_files_added),
             'gh_files_deleted': len(unique_files_deleted),
             'gh_files_modified': len(unique_files_modified),
+            'dockerfile_changed': dockerfile_changed,
+            'docker_compose_changed': docker_compose_changed,
         }
 
     except subprocess.CalledProcessError as e:
@@ -253,6 +265,8 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
     unique_files_added = 0
     unique_files_deleted = 0
     unique_files_modified = 0
+    dockerfile_changed = 0
+    docker_compose_changed = 0
 
     # **Ensure commit_sha is always included**
     commit_shas = [commit_sha]  # Start with the head commit of the run
@@ -303,6 +317,10 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
             unique_files_deleted += cached_data['gh_files_deleted']
             unique_files_modified += cached_data['gh_files_modified']
 
+            dockerfile_changed += cached_data['dockerfile_changed']
+            docker_compose_changed += cached_data['docker_compose_changed']
+            
+
             continue  # Skip redundant processing
 
         # **Get detailed file changes for this commit**
@@ -323,6 +341,10 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
             unique_files_deleted += commit_full_data['gh_files_deleted']
             unique_files_modified += commit_full_data['gh_files_modified']
 
+            dockerfile_changed += commit_full_data['dockerfile_changed']
+            docker_compose_changed += commit_full_data['docker_compose_changed']
+
+
             # Cache the commit data for efficiency
             commit_cache.put(sha, commit_full_data)
 
@@ -342,5 +364,8 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
         'gh_other_files': other_files,
         'gh_commits_on_files_touched': len(commits_on_files_touched),
         'gh_test_lines_per_kloc': (tests_added + tests_removed) / max((total_added + total_removed) / 1000, 1),
-        'file_types': list(file_types)
+        'file_types': list(file_types),
+        'dockerfile_changed': dockerfile_changed,
+        'docker_compose_changed': docker_compose_changed,
+
     }

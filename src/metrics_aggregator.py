@@ -21,7 +21,7 @@ def save_builds_to_file(builds_info, output_csv):
         'gh_job_id', 'total_jobs', 'gh_first_commit_created_at', 'gh_team_size_last_3_month',
         'gh_commits_on_files_touched', 'gh_num_pr_comments', 'git_merged_with', 'gh_test_lines_per_kloc',
         'build_language', 'dependencies_count', 'workflow_size', 'test_framework', 'tests_passed', 
-        'tests_failed', 'tests_skipped', 'tests_total', 'workflow_name', 'fetch_duration' 
+        'tests_failed', 'tests_skipped', 'tests_total', 'workflow_name', 'dockerfile_changed' , 'docker_compose_changed' , 'fetch_duration' 
     ]
 
     # **Load existing IDs from CSV to prevent duplicates**
@@ -61,7 +61,7 @@ def save_head(output_csv):
         'gh_job_id', 'total_jobs', 'gh_first_commit_created_at', 'gh_team_size_last_3_month',
         'gh_commits_on_files_touched', 'gh_num_pr_comments', 'git_merged_with', 'gh_test_lines_per_kloc',
         'build_language', 'dependencies_count', 'workflow_size', 'test_framework', 'tests_passed', 'tests_failed',
-        'tests_skipped', 'tests_total', 'workflow_name','fetch_duration'  # New field for fetch duration
+        'tests_skipped', 'tests_total', 'workflow_name' , 'dockerfile_changed' , 'docker_compose_changed' ,'fetch_duration'  # New field for fetch duration
     ]
 
     # Check if the file exists and already contains data

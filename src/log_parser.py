@@ -69,7 +69,7 @@ def get_github_actions_log(repo_full_name, run_id, token=None, max_retries=3):
                 return None  # No point retrying if logs don't exist
             
             else:
-                logging.error(f"Failed to fetch logs for run {run_id} in {repo_full_name}, Status: {response.status_code}")
+                logging.info(f"logs data for run {run_id} in {repo_full_name} does not exist, Status: {response.status_code}")
                 return None  # Other errors should not be retried
             
         except requests.exceptions.RequestException as err:

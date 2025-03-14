@@ -476,6 +476,9 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'gh_other_files': commit_data.get('gh_other_files', 0),
         'gh_commits_on_files_touched': commit_data.get('gh_commits_on_files_touched', 0),
         'gh_test_lines_per_kloc': commit_data.get('gh_test_lines_per_kloc', 0),
+        'dockerfile_changed': commit_data.get('dockerfile_changed', 0),
+        'docker_compose_changed': commit_data.get('docker_compose_changed', 0),
+
 
         # **Updated PR-related fields**
         'gh_pull_req_number': pr_details['gh_pull_req_number'],
