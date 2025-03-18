@@ -79,6 +79,58 @@ import subprocess
 import logging
 import os
 
+
+
+def compute_sloc_current_state(local_repo_path):
+    """Computes SLOC for the latest cloned state using the locally stored cloc.exe."""
+    
+    # Define the path to cloc.exe inside your /src folder
+    cloc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloc-2.04.exe")
+
+    try:
+        result = subprocess.run(
+            [cloc_path, local_repo_path, "--quiet", "--csv"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+
+        # Extract total SLOC count from the output
+        lines = sum(int(line.split(",")[-1]) for line in result.stdout.split("\n") if line and "SUM" in line)
+        return lines
+
+    except Exception as e:
+        logging.error(f"Failed to compute SLOC for latest state: {e}")
+        return None
+
+
+def compute_sloc_from_commits(commit_shas, local_repo_path):
+    """Computes cumulative SLOC by summing added and deleted lines."""
+    total_sloc = 0
+    try:
+        for sha in commit_shas:
+            result = subprocess.run(
+                ["git", "-C", local_repo_path, "show", "--numstat", "--pretty=format:", sha],
+                capture_output=True, text=True
+            )
+            lines = result.stdout.strip().split("\n")
+            
+            added, deleted = 0, 0
+            for line in lines:
+                parts = line.split("\t")
+                if len(parts) == 3:
+                    added_lines = int(parts[0]) if parts[0].isdigit() else 0
+                    deleted_lines = int(parts[1]) if parts[1].isdigit() else 0
+                    added += added_lines
+                    deleted += deleted_lines
+
+            total_sloc += (added - deleted)  # Net change
+    except Exception as e:
+        logging.error(f"Failed to compute SLOC from commits: {e}")
+
+    return total_sloc
+
+
+
+
 def get_file_line_count(commit_sha, file_path, local_repo_path):
     """
     Get the total number of lines in a file at a specific commit SHA.
@@ -251,7 +303,7 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
 
 
 
-def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors):
+def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors , sloc_initial):
     """
     Aggregates commit-related information, ensuring the run's commit_sha is always included,
     along with commits between the last run's end date and this run's creation date.
@@ -297,6 +349,17 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
 
     except subprocess.CalledProcessError as e:
         logging.error(f"Error running git log for {local_repo_path}: {e}")
+
+    # **Check if SLOC has already been computed for this commit range**
+    sloc_cached = commit_cache.get(f"sloc_{commit_sha}")
+    if sloc_cached is not None:
+        sloc_changes = sloc_cached
+    else:
+        # Compute SLOC from commits in this run
+        sloc_changes = compute_sloc_from_commits(commit_shas, local_repo_path)
+        commit_cache.put(f"sloc_{commit_sha}", sloc_changes)  # Cache the SLOC changes
+
+
 
     # **Process each commit, ensuring commit_sha is processed first**
     for sha in commit_shas:
@@ -367,5 +430,7 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
         'file_types': list(file_types),
         'dockerfile_changed': dockerfile_changed,
         'docker_compose_changed': docker_compose_changed,
+        'gh_sloc': sloc_initial + sloc_changes,  # Final SLOC computation
 
     }
+
