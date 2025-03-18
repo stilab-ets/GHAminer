@@ -14,7 +14,7 @@ import shutil
 
 from log_parser import parse_test_results , identify_test_frameworks_and_count_dependencies , identify_build_language , get_github_actions_log
 from patterns import framework_regex
-from commit_history_analyzer import get_commit_data_local, clone_repo_locally
+from commit_history_analyzer import get_commit_data_local, clone_repo_locally , compute_sloc_and_test_lines_current_state
 from repo_info_collector import get_repository_languages , get_workflow_ids , count_lines_in_workflow_yml , get_workflow_all_ids
 from metrics_aggregator import save_builds_to_file , save_head
 from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml , calculate_description_complexity
@@ -25,7 +25,7 @@ import numpy as np
 import zipfile
 import io
 
-github_token = 'your_token_here'  
+github_token = 'your_github_token_here'  
 output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
@@ -206,19 +206,26 @@ def get_team_size_last_three_months(repo_full_name, token, commit_cache):
 
 
 def fetch_pull_request_details(repo_full_name, commit_sha, token):
-    """Fetch pull request details including PR number and merge commit SHA."""
+    """Fetch pull request details including PR number, merge commit SHA, and correct comment count."""
+    
     # Get PRs that contain this commit
     pr_search_url = f"https://api.github.com/repos/{repo_full_name}/commits/{commit_sha}/pulls"
     pr_response = get_request(pr_search_url, token)
 
-    if pr_response:
-        if isinstance(pr_response, list) and len(pr_response) > 0:
-            # Take the first PR found (usually the correct one)
-            pr_info = pr_response[0]
+    if pr_response and isinstance(pr_response, list) and len(pr_response) > 0:
+        # Take the first PR found
+        pr_info = pr_response[0]
+        pr_number = pr_info.get('number', 0)
+
+        # Now fetch actual PR details including total comments
+        pr_details_url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}"
+        pr_details = get_request(pr_details_url, token)
+
+        if pr_details:
             return {
-                'gh_pull_req_number': pr_info.get('number', 0),
+                'gh_pull_req_number': pr_number,
                 'gh_is_pr': True,
-                'gh_num_pr_comments': pr_info.get('comments', 0),
+                'gh_num_pr_comments': pr_details.get('comments', 0),  # This gets the correct comment count
                 'git_merged_with': pr_info.get('merge_commit_sha', None),
                 'gh_description_complexity': calculate_description_complexity(pr_info),
             }
@@ -230,7 +237,6 @@ def fetch_pull_request_details(repo_full_name, commit_sha, token):
         'git_merged_with': None,
         'gh_description_complexity': 0,
     }
-
 
 
 def fetch_run_details(run_id, repo_full_name, token):
@@ -288,6 +294,14 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
     base_path = os.path.dirname(os.path.abspath(__file__))  # Get project folder path
     repo_url = f"https://github.com/{repo_full_name}.git"
     local_repo_path = clone_repo_locally(repo_url, base_path)
+    sloc_initial, test_lines_initial = compute_sloc_and_test_lines_current_state(local_repo_path)
+
+    # Ensure we have valid initial values
+    if sloc_initial is None:
+        sloc_initial = 0
+    if test_lines_initial is None:
+        test_lines_initial = 0
+
 
     # Get already recorded build IDs
     existing_build_ids = get_existing_build_ids(repo_full_name, output_csv)
@@ -347,7 +361,7 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
 
                     # Pass unique_contributors set to be updated within get_commit_data_local
                     commit_data = get_commit_data_local(
-                        commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors
+                        commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors, sloc_initial , test_lines_initial
                     )
 
                     # Fetch line count of the workflow YAML file
