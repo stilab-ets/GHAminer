@@ -81,30 +81,51 @@ import os
 
 
 
-def compute_sloc_current_state(local_repo_path):
-    """Computes SLOC for the latest cloned state using the locally stored cloc.exe."""
+def compute_sloc_and_test_lines_current_state(local_repo_path):
+    """Computes total SLOC and test-related lines for the latest cloned state using the locally stored cloc.exe."""
     
-    # Define the path to cloc.exe inside your /src folder
     cloc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloc-2.04.exe")
 
     try:
+        # Run cloc to compute SLOC
         result = subprocess.run(
             [cloc_path, local_repo_path, "--quiet", "--csv"],
             capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
 
         # Extract total SLOC count from the output
-        lines = sum(int(line.split(",")[-1]) for line in result.stdout.split("\n") if line and "SUM" in line)
-        return lines
+        sloc = sum(int(line.split(",")[-1]) for line in result.stdout.split("\n") if line and "SUM" in line)
+
+        # **Now, count test lines from actual test files**
+        test_lines = 0
+        result = subprocess.run(
+            ["git", "-C", local_repo_path, "ls-files"],  # Get all tracked files in the repo
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+
+        files_in_repo = result.stdout.strip().split("\n")
+
+        for file_path in files_in_repo:
+            if is_test_file(file_path):  # Use your existing function to check if it's a test file
+                test_result = subprocess.run(
+                    ["wc", "-l", os.path.join(local_repo_path, file_path)],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace"
+                )
+                if test_result.returncode == 0:
+                    test_lines += int(test_result.stdout.strip().split()[0])  # Extract line count
+
+        return sloc, test_lines
 
     except Exception as e:
-        logging.error(f"Failed to compute SLOC for latest state: {e}")
-        return None
+        logging.error(f"Failed to compute SLOC and test lines for latest state: {e}")
+        return None, None
 
 
-def compute_sloc_from_commits(commit_shas, local_repo_path):
-    """Computes cumulative SLOC by summing added and deleted lines."""
+def compute_sloc_and_test_lines_from_commits(commit_shas, local_repo_path):
+    """Computes cumulative SLOC and test-related lines by summing added and deleted lines."""
     total_sloc = 0
+    total_test_lines = 0
+
     try:
         for sha in commit_shas:
             result = subprocess.run(
@@ -113,20 +134,29 @@ def compute_sloc_from_commits(commit_shas, local_repo_path):
             )
             lines = result.stdout.strip().split("\n")
             
-            added, deleted = 0, 0
+            added, deleted, test_added, test_deleted = 0, 0, 0, 0
+
             for line in lines:
                 parts = line.split("\t")
                 if len(parts) == 3:
+                    filename = parts[2].strip()
                     added_lines = int(parts[0]) if parts[0].isdigit() else 0
                     deleted_lines = int(parts[1]) if parts[1].isdigit() else 0
                     added += added_lines
                     deleted += deleted_lines
 
-            total_sloc += (added - deleted)  # Net change
-    except Exception as e:
-        logging.error(f"Failed to compute SLOC from commits: {e}")
+                    # **If the file is a test file, track test lines**
+                    if is_test_file(filename):
+                        test_added += added_lines
+                        test_deleted += deleted_lines
 
-    return total_sloc
+            total_sloc += (added - deleted)  # Net change in SLOC
+            total_test_lines += (test_added - test_deleted)  # Net change in test lines
+
+    except Exception as e:
+        logging.error(f"Failed to compute SLOC and test lines from commits: {e}")
+
+    return total_sloc, total_test_lines
 
 
 
@@ -303,7 +333,7 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
 
 
 
-def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors , sloc_initial):
+def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors , sloc_initial , test_lines_initial):
     """
     Aggregates commit-related information, ensuring the run's commit_sha is always included,
     along with commits between the last run's end date and this run's creation date.
@@ -350,14 +380,18 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
     except subprocess.CalledProcessError as e:
         logging.error(f"Error running git log for {local_repo_path}: {e}")
 
-    # **Check if SLOC has already been computed for this commit range**
+    # **Check if SLOC and test lines have already been computed for this commit range**
     sloc_cached = commit_cache.get(f"sloc_{commit_sha}")
-    if sloc_cached is not None:
+    test_lines_cached = commit_cache.get(f"test_lines_{commit_sha}")
+
+    if sloc_cached is not None and test_lines_cached is not None:
         sloc_changes = sloc_cached
+        test_lines_changes = test_lines_cached
     else:
-        # Compute SLOC from commits in this run
-        sloc_changes = compute_sloc_from_commits(commit_shas, local_repo_path)
-        commit_cache.put(f"sloc_{commit_sha}", sloc_changes)  # Cache the SLOC changes
+        # Compute SLOC and test lines from commits in this run
+        sloc_changes, test_lines_changes = compute_sloc_and_test_lines_from_commits(commit_shas, local_repo_path)
+        commit_cache.put(f"sloc_{commit_sha}", sloc_changes)  # Cache SLOC changes
+        commit_cache.put(f"test_lines_{commit_sha}", test_lines_changes)  # Cache test lines
 
 
 
@@ -411,6 +445,14 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
             # Cache the commit data for efficiency
             commit_cache.put(sha, commit_full_data)
 
+    # **Final SLOC and Test Line Computation**
+    final_sloc = sloc_initial + sloc_changes
+    final_test_lines = test_lines_initial + test_lines_changes  # Include initial test lines!
+
+    # **Compute Test Lines Per KLOC**
+    test_lines_per_kloc = (final_test_lines / max(final_sloc / 1000, 1)) if final_sloc else 0
+
+
     # **Return aggregated commit data**
     return {
         'gh_files_added': unique_files_added,
@@ -426,7 +468,7 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
         'gh_doc_files': doc_files,
         'gh_other_files': other_files,
         'gh_commits_on_files_touched': len(commits_on_files_touched),
-        'gh_test_lines_per_kloc': (tests_added + tests_removed) / max((total_added + total_removed) / 1000, 1),
+        'gh_test_lines_per_kloc': test_lines_per_kloc,
         'file_types': list(file_types),
         'dockerfile_changed': dockerfile_changed,
         'docker_compose_changed': docker_compose_changed,
