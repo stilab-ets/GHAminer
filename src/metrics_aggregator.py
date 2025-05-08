@@ -13,7 +13,7 @@ def save_builds_to_file(builds_info, output_csv):
         return  # Skip if no new builds
 
     fieldnames = [
-        'repo', 'id_build', 'branch', 'commit_sha', 'languages', 'status', 'conclusion', 'created_at',
+        'repo', 'id_build', 'branch', 'commit_sha', 'languages', 'status', 'conclusion', 'workflow_event_trigger', 'issuer_name', 'workflow_id', 'created_at',
         'updated_at', 'build_duration', 'total_builds', 'gh_files_added', 'gh_files_deleted', 'gh_files_modified',
         'tests_ran', 'gh_lines_added', 'gh_lines_deleted', 'file_types', 'gh_tests_added',
         'gh_tests_deleted', 'gh_test_churn', 'gh_src_churn', 'gh_pull_req_number', 'gh_is_pr', 'gh_sloc',
@@ -53,7 +53,7 @@ import os
 def save_head(output_csv):
     """Save builds information to a CSV file, avoiding duplicate headers."""
     fieldnames = [
-        'repo', 'id_build', 'branch', 'commit_sha', 'languages', 'status', 'conclusion', 'created_at',
+        'repo', 'id_build', 'branch', 'commit_sha', 'languages', 'status', 'conclusion', 'workflow_event_trigger', 'issuer_name', 'workflow_id', 'created_at',
         'updated_at', 'build_duration', 'total_builds', 'gh_files_added', 'gh_files_deleted', 'gh_files_modified',
         'tests_ran', 'gh_lines_added', 'gh_lines_deleted', 'file_types', 'gh_tests_added',
         'gh_tests_deleted', 'gh_test_churn', 'gh_src_churn', 'gh_pull_req_number', 'gh_is_pr', 'gh_sloc',

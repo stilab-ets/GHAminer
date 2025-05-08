@@ -25,7 +25,7 @@ import numpy as np
 import zipfile
 import io
 
-github_token = 'your_github_token_here'  
+github_token = 'your_token'  
 output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
@@ -310,7 +310,7 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
     build_workflow_ids = get_workflow_all_ids(repo_full_name, token)
 
     languages = get_repository_languages(repo_full_name, token)
-    commit_cache = LRUCache(capacity=10000)
+    commit_cache = LRUCache(capacity=50000)
     gh_team_size = get_team_size_last_three_months(repo_full_name, token, commit_cache)
     repo_files = get_github_repo_files(repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
     build_language = identify_build_language(repo_files)
@@ -353,11 +353,17 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
 
                     start_time = time.time()
 
+                    # Extract necessary data
                     commit_sha = run['head_sha']
                     until_date = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
-
                     workflow_name = run.get('name', 'Unknown Workflow')
                     workflow_filename = run.get('path', 'unknown_workflow.yml')
+                    event_trigger = run.get('event', 'unknown')
+                    issuer = run.get('actor', {}).get('login', 'unknown')
+
+                    # Extract workflow_id from the run object
+                    workflow_id = run.get('workflow_id', 'unknown')  # This is the correct way to extract it
+
 
                     # Pass unique_contributors set to be updated within get_commit_data_local
                     commit_data = get_commit_data_local(
@@ -381,7 +387,7 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
                     build_info = compile_build_info(
                         run, repo_full_name, commit_data, commit_sha, languages,
                         len(unique_contributors), total_builds,
-                        gh_team_size, build_language, test_frameworks, dependency_count, workflow_size, framework_regex ,workflow_name, duration_to_fetch
+                        gh_team_size, build_language, test_frameworks, dependency_count, workflow_size, framework_regex ,workflow_name, event_trigger, issuer, workflow_id, duration_to_fetch
                     )
                     builds_info.append(build_info)
 
@@ -420,7 +426,7 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
 
 
 def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, number_of_committers, total_builds, gh_team_size,
-                       build_language, test_frameworks , dependency_count , workflow_size , framework_regex , workflow_name, duration_to_fetch):
+                       build_language, test_frameworks , dependency_count , workflow_size , framework_regex , workflow_name, event_trigger, issuer, workflow_id, duration_to_fetch):
     # Parsing build start and end times
     start_time = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
     end_time = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
@@ -464,10 +470,13 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
     build_info = {
         'repo': repo_full_name,
         'id_build': run['id'],
+        'workflow_id': workflow_id,
+        'issuer_name': issuer,
         'branch': run['head_branch'],
         'commit_sha': commit_sha,
         'languages': languages,
         'status': run['status'],
+        'workflow_event_trigger': event_trigger,
         'conclusion': run['conclusion'],
         'created_at': run['created_at'],
         'updated_at': run['updated_at'],
