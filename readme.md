@@ -1,5 +1,5 @@
 ## About the project:
-GHAminer is a data collection tool that enables practitioners and researchers to monitor, optimize, and improve Continuous Integration (CI) performance on GitHub Actions (GHA). This project is designed to extract a set of 45 GitHub-specific build metrics to provide insights into key CI workflow aspects such as build duration, test results, code changes, and repository metadata.
+GHAminer is a data collection tool that enables practitioners and researchers to monitor, optimize, and improve Continuous Integration (CI) performance on GitHub Actions (GHA). This project is designed to extract a set of 55 GitHub-specific build metrics to provide insights into key CI workflow aspects such as build duration, test results, code changes, and repository metadata.
 
 These metrics, listed in the next section (Metrics), capture build outcomes and workflow configurations across various levels of detail, offering valuable data-driven insights into CI efficiency and quality. The tool operates via modular components that facilitate efficient data extraction, commit history analysis, build log parsing, and more, while minimizing API load to enhance performance and scalability.
 
@@ -8,53 +8,63 @@ These metrics, listed in the next section (Metrics), capture build outcomes and 
 ## Metrics:
 The following table provides the list of the 45 metrics collected by GHAminer:
 
-| Metric Name                | Description                                                                                                 | Unit / Example          |
-|----------------------------|-------------------------------------------------------------------------------------------------------------|--------------------------|
-| id_build                   | Unique identifier of the build in the project                                                               | Integer / 9460091666     |
-| branch                     | Branch of the repository where the build was executed                                                       | String / main            |
-| commit_sha                 | SHA of the commit associated with the build                                                                 | String / f63d348b2273c...|
-| languages                  | Programming languages used in the project                                                                   | String / Java            |
-| status                     | Build status (e.g., completed, failed)                                                                      | String / completed       |
-| conclusion                 | Build result (e.g., success, failure)                                                                       | String / failure         |
-| created_at                 | Creation date of the build                                                                                  | Date / 2024-06-11T05:..  |
-| updated_at                 | Last updated date of the build                                                                              | Date / 2024-06-11T05:... |
-| build_duration             | Build process duration in seconds                                                                          | Float / 213              |
-| total_builds               | Total number of builds in the file                                                                          | Integer / 67             |
-| gh_files_added             | Number of files added by the commits                                                                        | Integer / 0              |
-| gh_files_deleted           | Number of files deleted by the commits                                                                      | Integer / 0              |
-| gh_files_modified          | Number of files modified by the commits                                                                     | Integer / 1              |
-| tests_ran                  | Whether tests were executed                                                                                | Other / False            |
-| gh_lines_added             | Number of (production code) lines added by the commits                                                      | Integer / 13             |
-| gh_lines_deleted           | Number of (production code) lines deleted by the commits                                                    | Integer / 1              |
-| file_types                 | File types used in the build                                                                                | String / .java           |
-| gh_tests_added             | Lines of test code added by the commits                                                                     | Integer / 0              |
-| gh_tests_deleted           | Lines of test code deleted by the commits                                                                   | Integer / 0              |
-| gh_test_churn              | Number of test code lines changed                                                                           | Integer / 0              |
-| gh_src_churn               | Number of production code lines changed                                                                     | Integer / 14             |
-| gh_pull_req_number         | GitHub pull request number                                                                                  | Integer / 0              |
-| gh_is_pr                   | Whether this build was triggered by a pull request                                                          | Other / False            |
-| gh_sloc                    | Number of executable source lines of code in the repository                                                 | Integer / 138900         |
-| gh_description_complexity  | Total words in title and description if `gh_is_pr` is true                                                  | Integer / 0              |
-| gh_src_files               | Number of production files in the commits                                                                   | Integer / 1              |
-| gh_doc_files               | Number of documentation files in the commits                                                                | Integer / 0              |
-| gh_other_files             | Number of other files in the commits                                                                        | Integer / 0              |
-| git_num_committers         | Number of comments on Git commits                                                                           | Integer / 130            |
-| gh_job_id                  | Unique job ID(s) in the project                                                                             | String / [26058288671,...]|
-| total_jobs                 | Total number of jobs in the build workflow                                                                  | Integer / 3              |
-| gh_first_commit_created_at | Timestamp of the first commit in the push triggering the build                                              | String / 2024-06-11T05:...|
-| gh_team_size_last_3_months | Team size contributing within the last 3 months                                                             | Integer / 5              |
-| gh_commits_on_files_touched| Number of unique modifications to files in this build within the last 3 months                              | Integer / 1              |
-| gh_num_pr_comments         | Number of comments on this pull request if `gh_is_pr` is true                                              | Integer / 0              |
-| git_merged_with            | SHA1 of the commit that merged this pull request                                                            | String / 43860b4f4...    |
-| gh_test_lines_per_kloc     | Test density: lines in test cases per 1,000 SLOC                                                            | Double / 226.4363        |
-| build_language             | Build log parser used (e.g., Java-maven, Java-gradle)                                                       | String / java-maven      |
-| total_dependencies         | Total number of dependencies used in the project                                                            | Integer / 24             |
-| workflow_file_size         | `build.yml` total lines of code                                                                            | Integer / 57             |
-| test_framework             | Test frameworks recognized and invoked by the analyzer                                                     | String / junit           |
-| tests_passed               | Number of tests passed if available (depends on `build_language` and `test_framework`)                      | Integer / 4136           |
-| tests_failed               | Number of tests failed if available                                                                        | Integer / 4              |
-| tests_skipped              | Number of tests skipped if available                                                                       | Integer / 312            |
-| tests_total                | Total number of tests in the project                                                                        | Integer / 4452           |
+| Metric Name                     | Description                                                                             | Unit / Example                   |
+| ------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------- |
+| repo                            | Full repository name (owner/repo)                                                       | String / mozilla-bteam/bmo       |
+| id\_build                       | Unique identifier of the build in the project                                           | Integer / 15115327064            |
+| branch                          | Branch of the repository where the build was executed                                   | String / main                    |
+| commit\_sha                     | SHA of the commit associated with the build                                             | String / 34aa9260e20f...         |
+| languages                       | Programming languages used in the project                                               | String / Perl                    |
+| status                          | Build status (e.g., completed, failed)                                                  | String / completed               |
+| conclusion                      | Build result (e.g., success, failure)                                                   | String / success                 |
+| workflow\_event\_trigger        | Event that triggered the workflow run (e.g., push, pull\_request)                       | String / pull\_request           |
+| issuer\_name                    | Username of the person who triggered the workflow                                       | String / dklawren                |
+| workflow\_id                    | Workflow ID in the repository                                                           | Integer / 69080091               |
+| created\_at                     | Creation date of the build                                                              | Date / 2025-05-19T14:13:13Z      |
+| updated\_at                     | Last updated date of the build                                                          | Date / 2025-05-19T14:29:12Z      |
+| build\_duration                 | Duration of the build in seconds                                                        | Float / 959.0                    |
+| total\_builds                   | Total number of builds in the file                                                      | Integer / 1                      |
+| gh\_files\_added                | Number of files added by the commits                                                    | Integer / 0                      |
+| gh\_files\_deleted              | Number of files deleted by the commits                                                  | Integer / 0                      |
+| gh\_files\_modified             | Number of files modified by the commits                                                 | Integer / 1                      |
+| tests\_ran                      | Whether tests were executed (based on job/step names)                                   | Boolean / True                   |
+| gh\_lines\_added                | Lines of production code added by the commits                                           | Integer / 107                    |
+| gh\_lines\_deleted              | Lines of production code deleted by the commits                                         | Integer / 18                     |
+| file\_types                     | List of file extensions used in the build                                               | List / \[".pl"]                  |
+| gh\_tests\_added                | Lines of test code added by the commits                                                 | Integer / 0                      |
+| gh\_tests\_deleted              | Lines of test code deleted by the commits                                               | Integer / 0                      |
+| gh\_test\_churn                 | Total number of test lines changed                                                      | Integer / 0                      |
+| gh\_src\_churn                  | Total number of source code lines changed                                               | Integer / 125                    |
+| gh\_pull\_req\_number           | Pull request number if applicable                                                       | Integer / 0                      |
+| gh\_is\_pr                      | Indicates if the build is associated with a pull request                                | Boolean / False                  |
+| gh\_sloc                        | Source lines of code in the repository                                                  | Integer / 230963                 |
+| gh\_description\_complexity     | Word count of the PR title and description                                              | Integer / 0                      |
+| gh\_src\_files                  | Number of source code files in the commits                                              | Integer / 1                      |
+| gh\_doc\_files                  | Number of documentation files in the commits                                            | Integer / 0                      |
+| gh\_other\_files                | Number of other files in the commits                                                    | Integer / 0                      |
+| git\_num\_committers            | Total number of unique committers since the start of the project                        | Integer / 281                    |
+| git\_commits                    | Total number of commits in the repository up until the run date                         | Integer / 13480                  |
+| gh\_job\_id                     | List of job IDs in the workflow                                                         | List / \[42484452320, ...]       |
+| total\_jobs                     | Total number of jobs in the workflow run                                                | Integer / 7                      |
+| job\_details                    | JSON structure containing job and step details, including start/end times and durations | JSON / \[ { "job\_name": ... } ] |
+| gh\_first\_commit\_created\_at  | Timestamp of the first commit in the workflow run                                       | Date / 2025-05-19T14:12:09Z      |
+| gh\_team\_size\_last\_3\_month  | Number of unique committers in the last 3 months                                        | Integer / 7                      |
+| gh\_commits\_on\_files\_touched | Number of unique modifications to files in the build within the last 3 months           | Integer / 8                      |
+| gh\_num\_pr\_comments           | Number of comments on the associated PR if applicable                                   | Integer / 0                      |
+| git\_merged\_with               | SHA of the commit that merged the pull request                                          | String / 43860b4f4...            |
+| gh\_test\_lines\_per\_kloc      | Test density: lines of test code per 1,000 SLOC                                         | Float / 72.63                    |
+| build\_language                 | Build tool/language detected (e.g., maven, gradle, npm)                                 | String / -                       |
+| dependencies\_count             | Number of dependencies detected                                                         | Integer / 0                      |
+| workflow\_size                  | Number of lines in the workflow file                                                    | Integer / 82                     |
+| test\_framework                 | Test frameworks detected in the build (e.g., junit, pytest)                             | List / \[]                       |
+| tests\_passed                   | Number of tests that passed                                                             | Integer / 0                      |
+| tests\_failed                   | Number of tests that failed                                                             | Integer / 0                      |
+| tests\_skipped                  | Number of tests that were skipped                                                       | Integer / 0                      |
+| tests\_total                    | Total number of tests in the workflow run                                               | Integer / 0                      |
+| workflow\_name                  | Name of the workflow run                                                                | String / BMO Test Suite          |
+| dockerfile\_changed             | Whether a Dockerfile was modified in the run                                            | Boolean / False                  |
+| docker\_compose\_changed        | Whether a docker-compose file was modified in the run                                   | Boolean / False                  |
+| fetch\_duration                 | Time taken to fetch data for the current build                                          | Float / 4.75                     |
 
 
 
@@ -133,11 +143,11 @@ To ensure GHAminer runs successfully, your GitHub token must have the following 
 #### Example Usage:
 To analyze repositories from a CSV file and save the results:
 ```bash
-python GHAMetrics.py.py -t <Your_GitHub_Token> -p /path/to/repositories.csv -fd 2023-01-01 -td 2023-12-31
+python GHAMetrics.py -t <Your_GitHub_Token> -p /path/to/repositories.csv -fd 2023-01-01 -td 2023-12-31
 ```
 To analyze a single repository:
 ```bash
-python GHAMetrics.py.py -t <Your_GitHub_Token> -s <GitHub_Repository_URL> -fd 2023-01-01 -td 2023-12-31
+python GHAMetrics.py -t <Your_GitHub_Token> -s <GitHub_Repository_URL> -fd 2023-01-01 -td 2023-12-31
 ```
 
 
