@@ -14,7 +14,7 @@ import shutil
 
 from log_parser import parse_test_results , identify_test_frameworks_and_count_dependencies , identify_build_language , get_github_actions_log
 from patterns import framework_regex
-from commit_history_analyzer import get_commit_data_local, clone_repo_locally , compute_sloc_and_test_lines_current_state
+from commit_history_analyzer import get_commit_data_local, clone_repo_locally , calculate_sloc_and_test_lines
 from repo_info_collector import get_repository_languages , get_workflow_ids , count_lines_in_workflow_yml , get_workflow_all_ids
 from metrics_aggregator import save_builds_to_file , save_head
 from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml , calculate_description_complexity
@@ -25,7 +25,7 @@ import numpy as np
 import zipfile
 import io
 
-github_token = 'your_token'  
+github_token = 'your_token_here'  
 output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
@@ -102,106 +102,6 @@ def fetch_file_content(repo_full_name, path, commit_sha, token):
             return None  # Return None for other errors
     except requests.exceptions.RequestException:
         return None  # Return None for network-related issues
-
-
-
-
-import time
-import logging
-from datetime import datetime, timedelta, timezone
-import requests
-
-def get_team_size_last_three_months(repo_full_name, token, commit_cache):
-    """
-    Efficiently fetches the number of unique contributors in the last three months.
-    Uses cached commit data if available, otherwise fetches from GitHub with rate limits in mind.
-    """
-    last_commit_url = f"https://api.github.com/repos/{repo_full_name}/commits"
-    committers = set()
-
-    # Check cached commits before making API requests
-    cached_commits = [commit for commit in commit_cache.cache.keys() if commit.startswith(repo_full_name)]
-    
-    if cached_commits:
-        logging.info(f"Using cached commits for {repo_full_name}")
-        for commit_sha in cached_commits:
-            commit_data = commit_cache.get(commit_sha)
-            if commit_data:
-                committers.add(commit_data.get('author', ''))  # Ensure author login is stored
-
-        if len(committers) > 0:
-            return len(committers)  # Return cached team size if data is available
-
-    logging.info(f"Fetching commits for {repo_full_name} from GitHub as cache is incomplete.")
-
-    # Get the latest commit date
-    response = get_request(last_commit_url, token)
-    if not response or not isinstance(response, list) or 'commit' not in response[0]:
-        logging.error(f"Failed to fetch commits for {repo_full_name}")
-        return None
-
-    last_commit_date = datetime.strptime(response[0]['commit']['committer']['date'], '%Y-%m-%dT%H:%M:%SZ')
-    start_date = last_commit_date - timedelta(days=90)  # Three months prior
-
-    # API request to fetch commits within the last 3 months
-    commits_url = f"{last_commit_url}?since={start_date.isoformat()}Z&until={last_commit_date.isoformat()}Z"
-
-    attempt = 0  # Retry counter
-
-    while commits_url:
-        try:
-            raw_response = requests.get(commits_url, headers={'Authorization': f'token {token}'})
-
-            if raw_response.status_code == 200:
-                response = raw_response.json()  # Convert to JSON list of commits
-
-                for commit in response:
-                    if commit.get('committer') and commit['committer'].get('login'):
-                        committers.add(commit['committer']['login'])
-                        commit_sha = commit.get('sha')
-                        if commit_sha:
-                            commit_cache.put(f"{repo_full_name}-{commit_sha}", {"author": commit['committer']['login']})
-
-                # Extract the next page URL from headers
-                link_header = raw_response.headers.get('Link', '')
-                commits_url = None  # Default to None, if no pagination exists
-                if link_header:
-                    links = {rel.split(";")[1].strip(): rel.split(";")[0].strip("<>") for rel in link_header.split(",")}
-                    if 'rel="next"' in links:
-                        commits_url = links['rel="next"']
-
-                attempt = 0  # Reset attempt counter after a successful request
-
-            elif raw_response.status_code == 403 and 'X-RateLimit-Reset' in raw_response.headers:
-                # Handle GitHub rate limits
-                reset_time = datetime.fromtimestamp(int(raw_response.headers['X-RateLimit-Reset']), timezone.utc)
-                sleep_time = (reset_time - datetime.now(timezone.utc)).total_seconds() + 10
-                logging.warning(f"Rate limit exceeded, sleeping for {sleep_time:.2f} seconds before retrying.")
-                time.sleep(sleep_time)
-
-            else:
-                logging.error(f"Failed to fetch commits, status code: {raw_response.status_code}")
-                attempt += 1
-                time.sleep(min(2 ** attempt, 60))  # Exponential backoff (max 60s)
-
-                if attempt > 5:  # Maximum retries
-                    logging.error("Max retries reached, aborting commit fetch.")
-                    break
-
-        except requests.RequestException as e:
-            logging.error(f"Error fetching commits: {e}")
-            attempt += 1
-            time.sleep(min(2 ** attempt, 60))  # Exponential backoff (max 60s)
-
-            if attempt > 5:
-                logging.error("Max retries reached due to request errors, aborting commit fetch.")
-                break
-
-    return len(committers)
-
-
-
-
 
 
 
@@ -294,13 +194,6 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
     base_path = os.path.dirname(os.path.abspath(__file__))  # Get project folder path
     repo_url = f"https://github.com/{repo_full_name}.git"
     local_repo_path = clone_repo_locally(repo_url, base_path)
-    sloc_initial, test_lines_initial = compute_sloc_and_test_lines_current_state(local_repo_path)
-
-    # Ensure we have valid initial values
-    if sloc_initial is None:
-        sloc_initial = 0
-    if test_lines_initial is None:
-        test_lines_initial = 0
 
 
     # Get already recorded build IDs
@@ -310,20 +203,19 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
     build_workflow_ids = get_workflow_all_ids(repo_full_name, token)
 
     languages = get_repository_languages(repo_full_name, token)
-    commit_cache = LRUCache(capacity=50000)
-    gh_team_size = get_team_size_last_three_months(repo_full_name, token, commit_cache)
+    #commit_cache = LRUCache(capacity=10000)
     repo_files = get_github_repo_files(repo_full_name.split('/')[0], repo_full_name.split('/')[1], token)
     build_language = identify_build_language(repo_files)
     test_frameworks, dependency_count = identify_test_frameworks_and_count_dependencies(
         repo_files, repo_full_name.split('/')[0], repo_full_name.split('/')[1], token
     )
-    last_end_date = None
-    unique_contributors = set()
 
 
     for workflow_id in build_workflow_ids:
         total_builds = 0
         page = 1
+        sloc_initial = test_lines_initial = 0
+        last_end_date = None
 
         while True:
             api_url = f"https://api.github.com/repos/{repo_full_name}/actions/workflows/{workflow_id}/runs?page={page}&per_page=100"
@@ -334,13 +226,14 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
                 break  # Stop if request fails
 
             response_data = response.json()
-            time.sleep(3)
+            time.sleep(1)
 
             if 'workflow_runs' in response_data and response_data['workflow_runs']:
                 builds_info = []
-                workflow_runs = response_data['workflow_runs'][::-1]  # Oldest to newest
+                workflow_runs = response_data['workflow_runs'] 
+                #workflow_runs = sorted(workflow_runs, key=lambda run: run['created_at'])
 
-                for run in workflow_runs:
+                for idx, run in enumerate(workflow_runs):
                     run_id = str(run['id'])  # Convert ID to string for consistency
 
                     if run_id in existing_build_ids:
@@ -355,20 +248,31 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
 
                     # Extract necessary data
                     commit_sha = run['head_sha']
-                    until_date = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
+                    run_date = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
                     workflow_name = run.get('name', 'Unknown Workflow')
                     workflow_filename = run.get('path', 'unknown_workflow.yml')
                     event_trigger = run.get('event', 'unknown')
                     issuer = run.get('actor', {}).get('login', 'unknown')
+                    workflow_id = run.get('workflow_id', 'unknown')
 
-                    # Extract workflow_id from the run object
-                    workflow_id = run.get('workflow_id', 'unknown')  # This is the correct way to extract it
+                    # Determine the next run's date (run+1)
+                    run_plus_1_date = None
+                    if idx + 1 < len(workflow_runs):
+                        run_plus_1_date = datetime.strptime(workflow_runs[idx + 1]['created_at'], '%Y-%m-%dT%H:%M:%SZ')
+                    
+
+                    if sloc_initial == 0 and test_lines_initial == 0:
+                        print(f"Calculating repo SLOC & test lines for first run of workflow {workflow_id}")
+                        timestamp_str = run_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+                        sloc_initial, test_lines_initial = calculate_sloc_and_test_lines(local_repo_path, commit_sha=commit_sha, timestamp=timestamp_str)
 
 
-                    # Pass unique_contributors set to be updated within get_commit_data_local
-                    commit_data = get_commit_data_local(
-                        commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors, sloc_initial , test_lines_initial
-                    )
+                    # get commits data within the range of this run and previous run
+                    commit_data = get_commit_data_local(commit_sha, local_repo_path, run_date, run_plus_1_date)
+
+                    sloc_initial -= commit_data.get('gh_lines_added', 0) + commit_data.get('gh_lines_deleted', 0)
+                    test_lines_initial -= commit_data.get('gh_tests_added', 0) + commit_data.get('gh_tests_deleted', 0)
+                    test_lines_per_1000_sloc = (test_lines_initial / sloc_initial) * 1000
 
                     # Fetch line count of the workflow YAML file
                     workflow_size = count_lines_in_workflow_yml(repo_full_name, workflow_filename, commit_sha, token)
@@ -376,24 +280,17 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
                         workflow_size = None  # Ensure NaN is recorded
 
 
-
-                    #build_info['workflow_name'] = workflow_name  # Use actual workflow name
-
+                    # time to fetch 1 row of data
                     duration_to_fetch = time.time() - start_time
-                    #build_info['fetch_duration'] = duration_to_fetch  # Add fetch duration
-
 
                     # Compile the build info
                     build_info = compile_build_info(
-                        run, repo_full_name, commit_data, commit_sha, languages,
-                        len(unique_contributors), total_builds,
-                        gh_team_size, build_language, test_frameworks, dependency_count, workflow_size, framework_regex ,workflow_name, event_trigger, issuer, workflow_id, duration_to_fetch
+                        run, repo_full_name, commit_data, sloc_initial , test_lines_per_1000_sloc,  commit_sha, languages, total_builds,
+                        build_language, test_frameworks, dependency_count, workflow_size, framework_regex ,workflow_name, event_trigger, issuer, workflow_id, duration_to_fetch
                     )
                     builds_info.append(build_info)
 
                     save_builds_to_file(builds_info, output_csv)
-
-                    last_end_date = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
 
                 logging.info(f"Processed page {page} of builds for workflow {workflow_id}")
 
@@ -425,21 +322,23 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
 
 
 
-def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, number_of_committers, total_builds, gh_team_size,
+def compile_build_info(run, repo_full_name, commit_data, sloc_initial, test_lines_per_1000_sloc, commit_sha, languages, total_builds,
                        build_language, test_frameworks , dependency_count , workflow_size , framework_regex , workflow_name, event_trigger, issuer, workflow_id, duration_to_fetch):
     # Parsing build start and end times
     start_time = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
     end_time = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
     duration = (end_time - start_time).total_seconds()
-    jobs_ids, job_count = get_jobs_for_run(repo_full_name, run['id'], github_token)  # Get job IDs and count
+    #jobs_ids, job_count = get_jobs_for_run(repo_full_name, run['id'], github_token)  # Get job IDs and count
+    jobs_ids, job_details, job_count = get_jobs_for_run(repo_full_name, run['id'], github_token)
 
     ### NEWLY ADDED CODE ##############################################################
     # You may get multiple frameworks; decide how to handle this case
     determined_framework = test_frameworks[0] if test_frameworks else "unknown"  # Default or handle appropriately
-
+    cumulative_test_results = {'passed': 0, 'failed': 0, 'skipped': 0, 'total': 0}
+    
     # Proceed with existing logic, including log fetching and parsing
     build_log = get_github_actions_log(repo_full_name, run['id'], github_token)
-    cumulative_test_results = {'passed': 0, 'failed': 0, 'skipped': 0, 'total': 0}
+    
 
     try:
         with zipfile.ZipFile(io.BytesIO(build_log), 'r') as zip_ref:
@@ -458,13 +357,29 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
     except zipfile.BadZipFile:
         print(f"Failed to unzip log file for build {run['id']}")
     ### END OF NEWLY ADDED CODE #######################################################
-
+    
     # Check if this build is PR-related
     pr_details = fetch_pull_request_details(repo_full_name, commit_sha, github_token)
 
-    # Determine if tests ran by checking 'steps' in each job
-    run_details = fetch_run_details(run['id'], repo_full_name, github_token)
-    tests_ran = any("test" in step['name'].lower() for job in run_details for step in job.get('steps', []))
+    # Filter out skipped jobs and steps
+    non_skipped_jobs = [
+        {
+            "job_name": job["job_name"],
+            "steps": [step for step in job["steps"] if step["step_conclusion"] != "skipped"]
+        }
+        for job in job_details if job["job_result"] != "skipped"
+    ]
+
+    print
+    # Check for the keyword 'test' in job and step names of non-skipped entries
+    tests_ran = any(
+        "test" in job['job_name'].lower() or 
+        any("test" in step['step_name'].lower() for step in job['steps'])
+        for job in non_skipped_jobs
+    )
+
+    head_commit_data = run.get('head_commit', {})
+    first_commit_created_at = head_commit_data.get('timestamp', "N/A")
 
     # Compile the build information dictionary
     build_info = {
@@ -493,12 +408,12 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'gh_tests_added': commit_data.get('gh_tests_added', 0),
         'gh_tests_deleted': commit_data.get('gh_tests_deleted', 0),
         'gh_test_churn': commit_data.get('gh_test_churn', 0),
-        'gh_sloc': commit_data.get('gh_sloc', 0),
+        'gh_sloc': sloc_initial,
         'gh_src_files': commit_data.get('gh_src_files', 0),
         'gh_doc_files': commit_data.get('gh_doc_files', 0),
         'gh_other_files': commit_data.get('gh_other_files', 0),
         'gh_commits_on_files_touched': commit_data.get('gh_commits_on_files_touched', 0),
-        'gh_test_lines_per_kloc': commit_data.get('gh_test_lines_per_kloc', 0),
+        'gh_test_lines_per_kloc': test_lines_per_1000_sloc,
         'dockerfile_changed': commit_data.get('dockerfile_changed', 0),
         'docker_compose_changed': commit_data.get('docker_compose_changed', 0),
 
@@ -510,11 +425,13 @@ def compile_build_info(run, repo_full_name, commit_data, commit_sha, languages, 
         'git_merged_with': pr_details['git_merged_with'],
         'gh_description_complexity': pr_details['gh_description_complexity'],
 
-        'git_num_committers': number_of_committers,
+        'git_num_committers': commit_data.get('unique_committers', 0),
+        'git_commits' : commit_data.get('git_commits' , 0),
         'gh_job_id': jobs_ids,
         'total_jobs': job_count,
-        'gh_first_commit_created_at': run['head_commit']['timestamp'],
-        'gh_team_size_last_3_month': gh_team_size,
+        'job_details': json.dumps(job_details),  # Store job details as a JSON string
+        'gh_first_commit_created_at': first_commit_created_at,  # Safely handled
+        'gh_team_size_last_3_month': commit_data.get('committers_3_months' , 0),
         'build_language': build_language,
         'dependencies_count': dependency_count,  
         'workflow_size': workflow_size, 

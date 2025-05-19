@@ -4,13 +4,9 @@ from datetime import datetime, timezone, timedelta
 import os
 from file_indicators import is_production_file , is_test_file
 import subprocess
-
-
+import json
 import shutil
 
-import os
-import subprocess
-import shutil
 
 def clone_repo_locally(repo_url, base_path):
     """Clone the repository inside a tmp/ directory in the project folder."""
@@ -44,8 +40,6 @@ def clone_repo_locally(repo_url, base_path):
     return local_repo_path  # Return the path so it can be used later
 
 
-
-
 def is_documentation_file(file_path):
     doc_extensions = ('.md', '.rst', '.txt', '.pdf')
     doc_directories = ['doc', 'docs', 'documentation', 'guide', 'help', 'manual', 'manuals', 'guides']
@@ -71,92 +65,131 @@ def is_documentation_file(file_path):
 
 
 
-import subprocess
-import logging
-import os
+def calculate_sloc_and_test_lines(local_repo_path, commit_sha=None, timestamp=None):
+    """
+    Calculates SLOC and test lines for the repository at a specific commit or timestamp.
 
-import subprocess
-import logging
-import os
+    Args:
+        local_repo_path (str): Path to the local repository.
+        commit_sha (str): Specific commit to checkout. If None, use the latest state.
+        timestamp (str): If commit_sha is None, use the latest state at this timestamp.
 
+    Returns:
+        tuple: (SLOC, Test lines)
+    """
+    import json
+    from datetime import datetime
 
-
-def compute_sloc_and_test_lines_current_state(local_repo_path):
-    """Computes total SLOC and test-related lines for the latest cloned state using the locally stored cloc.exe."""
+    SCC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scc.exe")
     
-    cloc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloc-2.04.exe")
+    # Ensure repository path exists
+    if not os.path.exists(local_repo_path):
+        logging.error(f"Repository path not found: {local_repo_path}")
+        return None, None
 
+    # Flag to track if checkout was successful
+    checkout_successful = False
+
+    # Attempt to checkout the specific commit if provided
+    if commit_sha:
+        try:
+            print(f"Attempting to checkout to commit: {commit_sha}")
+            subprocess.run(["git", "-C", local_repo_path, "checkout", commit_sha],
+                           check=True, capture_output=True, text=True)
+            checkout_successful = True
+            print(f"Checked out to commit: {commit_sha}")
+
+        except subprocess.CalledProcessError as e:
+            logging.warning(f"Failed to checkout to commit {commit_sha}: {e}")
+
+    # If checkout failed or commit not provided, use timestamp to find the commit
+    if not checkout_successful and timestamp:
+        try:
+            print(f"Finding commit at timestamp: {timestamp}")
+            git_timestamp = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
+            result = subprocess.run(
+                ["git", "-C", local_repo_path, "rev-list", "-1", "--before", git_timestamp, "HEAD"],
+                capture_output=True, text=True
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                commit_sha = result.stdout.strip()
+                print(f"Found commit at timestamp: {commit_sha}")
+
+                # Try to checkout to the found commit
+                try:
+                    subprocess.run(["git", "-C", local_repo_path, "checkout", commit_sha],
+                                   check=True, capture_output=True, text=True)
+                    checkout_successful = True
+                    print(f"Checked out to commit at timestamp: {commit_sha}")
+
+                except subprocess.CalledProcessError as e:
+                    logging.warning(f"Failed to checkout to commit at timestamp {timestamp}: {e}")
+
+        except Exception as e:
+            logging.error(f"Error finding commit by timestamp: {e}")
+
+    # If both commit and timestamp failed, log a warning
+    if not checkout_successful:
+        print(f"Proceeding with the latest state of the repo at {local_repo_path}.")
+
+    # Calculate SLOC and test lines using scc
     try:
-        # Run cloc to compute SLOC
+        print(f"Running scc on: {local_repo_path}")
         result = subprocess.run(
-            [cloc_path, local_repo_path, "--quiet", "--csv"],
+            [SCC_PATH, "--no-cocomo", "--format", "json", local_repo_path],
             capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
 
-        # Extract total SLOC count from the output
-        sloc = sum(int(line.split(",")[-1]) for line in result.stdout.split("\n") if line and "SUM" in line)
+        if result.returncode != 0:
+            logging.error(f"scc execution failed: {result.stderr}")
+            return None, None
 
-        # **Now, count test lines from actual test files**
+        # Parse the JSON output
+        loc_data = json.loads(result.stdout)
+        sloc = sum(entry["Code"] for entry in loc_data)
+
+        # Identify potential test files
+        print("Identifying potential test files...")
+        result = subprocess.run(
+            ["git", "-C", local_repo_path, "ls-files"],
+            capture_output=True, text=True
+        )
+
         test_lines = 0
-        result = subprocess.run(
-            ["git", "-C", local_repo_path, "ls-files"],  # Get all tracked files in the repo
-            capture_output=True, text=True, encoding="utf-8", errors="replace"
-        )
 
-        files_in_repo = result.stdout.strip().split("\n")
+        if result.returncode == 0:
+            files_in_repo = result.stdout.strip().split("\n")
+            
+            for file_path in files_in_repo:
+                # Identify test files based on name
+                if "test" in file_path.lower() or "spec" in file_path.lower():
+                    full_path = os.path.join(local_repo_path, file_path)
+                    
+                    # Check if file exists before counting lines
+                    if os.path.exists(full_path):
+                        try:
+                            with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                                lines = f.readlines()
+                                test_lines += len(lines)
+                            print(f"Test file: {file_path} - {len(lines)} lines")
+                        except Exception as e:
+                            logging.warning(f"Error reading file {file_path}: {e}")
 
-        for file_path in files_in_repo:
-            if is_test_file(file_path):  # Use your existing function to check if it's a test file
-                test_result = subprocess.run(
-                    ["wc", "-l", os.path.join(local_repo_path, file_path)],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace"
-                )
-                if test_result.returncode == 0:
-                    test_lines += int(test_result.stdout.strip().split()[0])  # Extract line count
-
+        print(f"SLOC: {sloc}, Test Lines: {test_lines}")
         return sloc, test_lines
 
     except Exception as e:
-        logging.error(f"Failed to compute SLOC and test lines for latest state: {e}")
+        logging.error(f"Error running scc: {e}")
         return None, None
 
-
-def compute_sloc_and_test_lines_from_commits(commit_shas, local_repo_path):
-    """Computes cumulative SLOC and test-related lines by summing added and deleted lines."""
-    total_sloc = 0
-    total_test_lines = 0
-
-    try:
-        for sha in commit_shas:
-            result = subprocess.run(
-                ["git", "-C", local_repo_path, "show", "--numstat", "--pretty=format:", sha],
-                capture_output=True, text=True
-            )
-            lines = result.stdout.strip().split("\n")
-            
-            added, deleted, test_added, test_deleted = 0, 0, 0, 0
-
-            for line in lines:
-                parts = line.split("\t")
-                if len(parts) == 3:
-                    filename = parts[2].strip()
-                    added_lines = int(parts[0]) if parts[0].isdigit() else 0
-                    deleted_lines = int(parts[1]) if parts[1].isdigit() else 0
-                    added += added_lines
-                    deleted += deleted_lines
-
-                    # **If the file is a test file, track test lines**
-                    if is_test_file(filename):
-                        test_added += added_lines
-                        test_deleted += deleted_lines
-
-            total_sloc += (added - deleted)  # Net change in SLOC
-            total_test_lines += (test_added - test_deleted)  # Net change in test lines
-
-    except Exception as e:
-        logging.error(f"Failed to compute SLOC and test lines from commits: {e}")
-
-    return total_sloc, total_test_lines
+    finally:
+        # Checkout back to the main branch to avoid repo lock issues
+        try:
+            subprocess.run(["git", "-C", local_repo_path, "checkout", "main"], check=True,
+                           capture_output=True, text=True)
+        except subprocess.CalledProcessError:
+            pass
 
 
 
@@ -189,7 +222,7 @@ def get_last_commit_containing_file(file_path, commit_sha, local_repo_path):
     except subprocess.CalledProcessError:
         return None  # File has no prior history
 
-def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributors):
+def fetch_full_commit_data_local(commit_sha, local_repo_path):
     """Fetch detailed commit data using local Git, ensuring the commit exists before retrieving details."""
     try:
         if not os.path.exists(local_repo_path):
@@ -221,8 +254,6 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
 
         # **Extract commit author**
         author_name = output[0].strip() if output else "Unknown"
-        unique_contributors.add(author_name)
-
         # **Initialize commit metadata**
         total_added = total_removed = tests_added = tests_removed = 0
         src_files = doc_files = other_files = 0
@@ -329,11 +360,197 @@ def fetch_full_commit_data_local(commit_sha, local_repo_path, unique_contributor
 
 
 
+from datetime import datetime, timedelta
+
+def count_commits_on_files_last_3_months(local_repo_path, commit_sha):
+    """
+    Counts the number of unique commits on each file in the given commit within the last 3 months.
+
+    Args:
+        local_repo_path (str): Path to the local repository.
+        commit_sha (str): Commit SHA to analyze.
+
+    Returns:
+        int: Total number of unique commits on the files in the given commit within the last 3 months.
+    """
+    # Get the list of files in the given commit
+    try:
+        result = subprocess.run(
+            ["git", "-C", local_repo_path, "show", "--name-only", "--pretty=format:", commit_sha],
+            capture_output=True, text=True, check=True
+        )
+        files_in_commit = result.stdout.strip().splitlines()
+
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error fetching files for commit {commit_sha}: {e}")
+        return 0
+
+    if not files_in_commit:
+        logging.warning(f"No files found for commit {commit_sha}")
+        return 0
+
+    # Determine the time range (last 3 months)
+    try:
+        # Get the commit date
+        result = subprocess.run(
+            ["git", "-C", local_repo_path, "show", "-s", "--format=%ci", commit_sha],
+            capture_output=True, text=True, check=True
+        )
+        commit_date_str = result.stdout.strip()
+        commit_date = datetime.strptime(commit_date_str, "%Y-%m-%d %H:%M:%S %z")
+        three_months_ago = commit_date - timedelta(days=90)
+
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error fetching commit date for {commit_sha}: {e}")
+        return 0
+
+    # Track unique commits per file
+    unique_commits = set()
+
+    # For each file, get the commits within the last 3 months
+    for file_path in files_in_commit:
+        try:
+            result = subprocess.run(
+                [
+                    "git", "-C", local_repo_path, "log", "--since", three_months_ago.isoformat(), 
+                    "--pretty=format:%H", "--", file_path
+                ],
+                capture_output=True, text=True, check=True
+            )
+            commits = set(result.stdout.strip().splitlines())
+            unique_commits.update(commits)
+
+        except subprocess.CalledProcessError as e:
+            logging.warning(f"Error fetching commits for file {file_path}: {e}")
+
+    return len(unique_commits)
 
 
 
+def get_unique_committers(local_repo_path, run_date):
+    """
+    Retrieves the list of unique committers to the repository since the start of the project until the run date.
 
-def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date, commit_cache, unique_contributors , sloc_initial , test_lines_initial):
+    Args:
+        local_repo_path (str): Path to the local repository.
+        run_date (datetime): Date of the run.
+
+    Returns:
+        set: Set of unique committers (names and emails).
+    """
+    unique_committers = set()
+
+    try:
+        print(f"Fetching committers using run date: {run_date}")
+
+        # Fetch committers from the start of the project until the run date
+        result = subprocess.run(
+            [
+                "git", "-C", local_repo_path, "log",
+                "--until", run_date.isoformat(),
+                "--format=%an <%ae>"
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="ignore"
+        )
+
+        if result.stdout:
+            committers = result.stdout.strip().splitlines()
+            unique_committers.update(committers)
+
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error fetching committers by run date: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error fetching committers: {e}")
+
+    return unique_committers
+
+
+
+from datetime import timedelta
+
+def get_unique_committers_3_months(local_repo_path, run_date):
+    """
+    Retrieves the number of unique committers to the repository within the last 3 months 
+    from the given run date.
+
+    Args:
+        local_repo_path (str): Path to the local repository.
+        run_date (datetime): Date of the run.
+
+    Returns:
+        set: Set of unique committers (names and emails).
+    """
+    unique_committers = set()
+
+    # Calculate the 3-month window
+    start_date = run_date - timedelta(days=90)
+
+    try:
+        print(f"Fetching committers from {start_date} to {run_date}")
+
+        # Fetch committers within the 3-month window
+        result = subprocess.run(
+            [
+                "git", "-C", local_repo_path, "log",
+                f"--since={start_date.isoformat()}",
+                f"--until={run_date.isoformat()}",
+                "--format=%an <%ae>"
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="ignore"
+        )
+
+        if result.stdout:
+            committers = result.stdout.strip().splitlines()
+            unique_committers.update(committers)
+
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error fetching committers for 3-month window: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error fetching committers for 3-month window: {e}")
+
+    return unique_committers
+
+
+
+def get_commit_count_until_date(local_repo_path, run_date):
+    """
+    Calculates the number of commits in the repository up until the specified run date.
+
+    Args:
+        local_repo_path (str): Path to the local repository.
+        run_date (datetime): Date of the run.
+
+    Returns:
+        int: Total number of commits up until the run date.
+    """
+    commit_count = 0
+
+    try:
+        print(f"Calculating commit count until {run_date.isoformat()}")
+
+        # Fetch commit count until the run date
+        result = subprocess.run(
+            [
+                "git", "-C", local_repo_path, "rev-list",
+                "--count", "--before", run_date.isoformat(), "HEAD"
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="ignore"
+        )
+
+        if result.stdout.strip():
+            commit_count = int(result.stdout.strip())
+
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error fetching commit count until {run_date}: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error fetching commit count: {e}")
+
+    return commit_count
+
+
+
+# gets commits details from a last end date till and untill date
+def get_commit_data_local(commit_sha, local_repo_path, run_date, run_plus_1_date):
     """
     Aggregates commit-related information, ensuring the run's commit_sha is always included,
     along with commits between the last run's end date and this run's creation date.
@@ -342,7 +559,7 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
     total_added = total_removed = tests_added = tests_removed = 0
     src_files = doc_files = other_files = 0
     file_types = set()
-    commits_on_files_touched = set()
+    #commits_on_files_touched = set()
 
     unique_files_added = 0
     unique_files_deleted = 0
@@ -353,18 +570,17 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
     # **Ensure commit_sha is always included**
     commit_shas = [commit_sha]  # Start with the head commit of the run
 
-    # **Extract commits in the range**
-    if last_end_date is None:
-        # First build: limit to 10 commits (to mimic API behavior)
+    # Determine the git log command based on the presence of run_plus_1_date
+    if run_plus_1_date is None:
+        # No previous run, only analyze the specific `commit_sha`
         git_log_command = [
-            "git", "-C", local_repo_path, "log", f"--until={until_date.isoformat()}Z",
-            "-n", "10", "--pretty=format:%H"
+            "git", "-C", local_repo_path, "show", "--pretty=format:%H", "--no-patch", commit_sha
         ]
     else:
         # Subsequent builds: get commits between `until_date` and `last_end_date`
         git_log_command = [
             "git", "-C", local_repo_path, "log",
-            f"--since={last_end_date.isoformat()}Z", f"--until={until_date.isoformat()}Z",
+            f"--since={run_plus_1_date.isoformat()}Z", f"--until={run_date.isoformat()}Z",
             "--pretty=format:%H"
         ]
 
@@ -380,50 +596,13 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
     except subprocess.CalledProcessError as e:
         logging.error(f"Error running git log for {local_repo_path}: {e}")
 
-    # **Check if SLOC and test lines have already been computed for this commit range**
-    sloc_cached = commit_cache.get(f"sloc_{commit_sha}")
-    test_lines_cached = commit_cache.get(f"test_lines_{commit_sha}")
-
-    if sloc_cached is not None and test_lines_cached is not None:
-        sloc_changes = sloc_cached
-        test_lines_changes = test_lines_cached
-    else:
-        # Compute SLOC and test lines from commits in this run
-        sloc_changes, test_lines_changes = compute_sloc_and_test_lines_from_commits(commit_shas, local_repo_path)
-        commit_cache.put(f"sloc_{commit_sha}", sloc_changes)  # Cache SLOC changes
-        commit_cache.put(f"test_lines_{commit_sha}", test_lines_changes)  # Cache test lines
-
-
-
     # **Process each commit, ensuring commit_sha is processed first**
     for sha in commit_shas:
-        # Check cache to avoid redundant calls
-        cached_data = commit_cache.get(sha)
-        if cached_data:
-            total_added += cached_data['total_added']
-            total_removed += cached_data['total_removed']
-            tests_added += cached_data['tests_added']
-            tests_removed += cached_data['tests_removed']
-            src_files += cached_data['src_files']
-            doc_files += cached_data['doc_files']
-            other_files += cached_data['other_files']
-            file_types.update(cached_data['file_types'])
-            commits_on_files_touched.add(sha)
-
-            unique_files_added += cached_data['gh_files_added']
-            unique_files_deleted += cached_data['gh_files_deleted']
-            unique_files_modified += cached_data['gh_files_modified']
-
-            dockerfile_changed += cached_data['dockerfile_changed']
-            docker_compose_changed += cached_data['docker_compose_changed']
-            
-
-            continue  # Skip redundant processing
 
         # **Get detailed file changes for this commit**
-        commit_full_data = fetch_full_commit_data_local(sha, local_repo_path, unique_contributors)
+        commit_full_data = fetch_full_commit_data_local(sha, local_repo_path)
         if commit_full_data:
-            commits_on_files_touched.add(sha)
+            #commits_on_files_touched.add(sha)
             total_added += commit_full_data['total_added']
             total_removed += commit_full_data['total_removed']
             tests_added += commit_full_data['tests_added']
@@ -441,17 +620,10 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
             dockerfile_changed += commit_full_data['dockerfile_changed']
             docker_compose_changed += commit_full_data['docker_compose_changed']
 
-
-            # Cache the commit data for efficiency
-            commit_cache.put(sha, commit_full_data)
-
-    # **Final SLOC and Test Line Computation**
-    final_sloc = sloc_initial + sloc_changes
-    final_test_lines = test_lines_initial + test_lines_changes  # Include initial test lines!
-
-    # **Compute Test Lines Per KLOC**
-    test_lines_per_kloc = (final_test_lines / max(final_sloc / 1000, 1)) if final_sloc else 0
-
+    commits_on_files_touched_count = count_commits_on_files_last_3_months(local_repo_path, commit_sha)
+    committers_3_months = get_unique_committers_3_months(local_repo_path, run_date)
+    unique_committers = get_unique_committers(local_repo_path, run_date=run_date)
+    commit_count = get_commit_count_until_date(local_repo_path, run_date)
 
     # **Return aggregated commit data**
     return {
@@ -467,12 +639,11 @@ def get_commit_data_local(commit_sha, local_repo_path, until_date, last_end_date
         'gh_src_files': src_files,
         'gh_doc_files': doc_files,
         'gh_other_files': other_files,
-        'gh_commits_on_files_touched': len(commits_on_files_touched),
-        'gh_test_lines_per_kloc': test_lines_per_kloc,
+        'gh_commits_on_files_touched': commits_on_files_touched_count,
         'file_types': list(file_types),
         'dockerfile_changed': dockerfile_changed,
         'docker_compose_changed': docker_compose_changed,
-        'gh_sloc': sloc_initial + sloc_changes,  # Final SLOC computation
-
+        'unique_committers' : len(unique_committers),
+        "committers_3_months" : len(committers_3_months),
+        "git_commits" : commit_count
     }
-

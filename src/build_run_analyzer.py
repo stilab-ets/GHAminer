@@ -27,7 +27,7 @@ def get_request(url, token):
     return None
 
 
-def get_jobs_for_run(repo_full_name, run_id, token):
+def get_jobs_for_run_old(repo_full_name, run_id, token):
     url = f"https://api.github.com/repos/{repo_full_name}/actions/runs/{run_id}/jobs"
     headers = {'Authorization': f'token {token}'}
     jobs_response = requests.get(url, headers=headers).json()
@@ -37,6 +37,105 @@ def get_jobs_for_run(repo_full_name, run_id, token):
             jobs_ids.append(job['id'])
     return jobs_ids, len(jobs_ids)  # Return both job IDs and the count of jobs
 
+
+
+def get_jobs_for_run_old_2(repo_full_name, run_id, token):
+    """
+    Fetch job details for a specific run. Handles retries and rate limits.
+    """
+    url = f"https://api.github.com/repos/{repo_full_name}/actions/runs/{run_id}/jobs"
+    jobs_response = get_request(url, token)
+
+    jobs_ids = []
+    #print("jobs response : " , jobs_response)
+    # Ensure the response is a valid dictionary with the 'jobs' key
+    if jobs_response and isinstance(jobs_response, dict):
+        if 'jobs' in jobs_response:
+            for job in jobs_response['jobs']:
+                jobs_ids.append(job['id'])
+        else:
+            logging.warning(f"Expected 'jobs' key in response for run {run_id}, but not found. Response: {jobs_response}")
+    else:
+        logging.error(f"Invalid or empty response for jobs endpoint. URL: {url}, Response: {jobs_response}")
+
+    return jobs_ids, len(jobs_ids)  # Return job IDs and count
+
+
+
+def get_jobs_for_run(repo_full_name, run_id, token):
+    """
+    Fetch job details for a specific run. Handles retries and rate limits.
+    Returns a list of job IDs, job details with steps info, and the count of jobs.
+    """
+    url = f"https://api.github.com/repos/{repo_full_name}/actions/runs/{run_id}/jobs"
+    jobs_response = get_request(url, token)
+
+    jobs_ids = []
+    job_details = []
+
+    if jobs_response and isinstance(jobs_response, dict):
+        if 'jobs' in jobs_response:
+            for job in jobs_response['jobs']:
+                job_id = job['id']
+                job_name = job.get('name', 'Unknown')
+                start_time = job.get('started_at')
+                end_time = job.get('completed_at')
+                result = job.get('conclusion', 'unknown')
+
+                # Calculate job duration
+                job_duration = "N/A"
+                if start_time and end_time:
+                    try:
+                        start_dt = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ")
+                        end_dt = datetime.strptime(end_time, "%Y-%m-%dT%H:%M:%SZ")
+                        job_duration = (end_dt - start_dt).total_seconds()
+                    except Exception as e:
+                        logging.error(f"Error calculating duration for job {job_id}: {e}")
+
+                # Collect step details
+                steps = []
+                if 'steps' in job:
+                    for step in job['steps']:
+                        step_name = step.get('name', 'Unknown')
+                        step_conclusion = step.get('conclusion', 'unknown')
+                        step_start = step.get('started_at')
+                        step_end = step.get('completed_at')
+
+                        # Calculate step duration
+                        step_duration = "N/A"
+                        if step_start and step_end:
+                            try:
+                                step_start_dt = datetime.strptime(step_start, "%Y-%m-%dT%H:%M:%SZ")
+                                step_end_dt = datetime.strptime(step_end, "%Y-%m-%dT%H:%M:%SZ")
+                                step_duration = (step_end_dt - step_start_dt).total_seconds()
+                            except Exception as e:
+                                logging.error(f"Error calculating duration for step {step_name} in job {job_id}: {e}")
+
+                        steps.append({
+                            "step_name": step_name,
+                            "step_conclusion": step_conclusion,
+                            "step_start": step_start,
+                            "step_end": step_end,
+                            "step_duration": step_duration
+                        })
+
+                # Append job details
+                jobs_ids.append(job_id)
+                job_details.append({
+                    "job_name": job_name,
+                    "job_start": start_time,
+                    "job_end": end_time,
+                    "job_duration": job_duration,
+                    "job_result": result,
+                    "steps": steps
+                })
+
+        else:
+            logging.warning(f"Expected 'jobs' key in response for run {run_id}, but not found. Response: {jobs_response}")
+    else:
+        logging.error(f"Invalid or empty response for jobs endpoint. URL: {url}, Response: {jobs_response}")
+
+    return jobs_ids, job_details, len(jobs_ids)
 
 
 
