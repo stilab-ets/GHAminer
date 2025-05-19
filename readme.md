@@ -94,7 +94,7 @@ GHAminer is a standalone Python script that can be executed from the command lin
 To run GHAminer, use the following command along with the specified parameters:
 
 ```bash
-python GHAMetrics.py.py <parameters>
+python GHAMetrics.py <parameters>
 ```
 
 #### Input projects csv file (github_projects.csv): 
