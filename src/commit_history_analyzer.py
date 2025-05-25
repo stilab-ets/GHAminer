@@ -7,7 +7,12 @@ import subprocess
 import json
 import shutil
 import platform
+import stat
 
+def ensure_executable(path):
+    if platform.system() != "Windows":
+        st = os.stat(path)
+        os.chmod(path, st.st_mode | stat.S_IEXEC)
 
 
 def get_scc_path():
@@ -99,6 +104,7 @@ def calculate_sloc_and_test_lines(local_repo_path, commit_sha=None, timestamp=No
     from datetime import datetime
 
     SCC_PATH = get_scc_path()
+    ensure_executable(SCC_PATH)
     
     # Ensure repository path exists
     if not os.path.exists(local_repo_path):
