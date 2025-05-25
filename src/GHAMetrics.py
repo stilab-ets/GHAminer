@@ -261,17 +261,17 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
                         run_plus_1_date = datetime.strptime(workflow_runs[idx + 1]['created_at'], '%Y-%m-%dT%H:%M:%SZ')
                     
 
-                    if sloc_initial == 0 and test_lines_initial == 0:
-                        print(f"Calculating repo SLOC & test lines for first run of workflow {workflow_id}")
-                        timestamp_str = run_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-                        sloc_initial, test_lines_initial = calculate_sloc_and_test_lines(local_repo_path, commit_sha=commit_sha, timestamp=timestamp_str)
+                    #if sloc_initial == 0 and test_lines_initial ==0 :
+                    print(f"Calculating repo SLOC & test lines for first run of workflow {workflow_id}")
+                    timestamp_str = run_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    sloc_initial, test_lines_initial = calculate_sloc_and_test_lines(local_repo_path, commit_sha=commit_sha, timestamp=timestamp_str)
 
 
                     # get commits data within the range of this run and previous run
                     commit_data = get_commit_data_local(commit_sha, local_repo_path, run_date, run_plus_1_date)
 
-                    sloc_initial -= commit_data.get('gh_lines_added', 0) + commit_data.get('gh_lines_deleted', 0)
-                    test_lines_initial -= commit_data.get('gh_tests_added', 0) + commit_data.get('gh_tests_deleted', 0)
+                    #sloc_initial -= commit_data.get('gh_lines_added', 0) + commit_data.get('gh_lines_deleted', 0)
+                    #test_lines_initial -= commit_data.get('gh_tests_added', 0) + commit_data.get('gh_tests_deleted', 0)
                     test_lines_per_1000_sloc = (test_lines_initial / sloc_initial) * 1000
 
                     # Fetch line count of the workflow YAML file
@@ -331,33 +331,34 @@ def compile_build_info(run, repo_full_name, commit_data, sloc_initial, test_line
     #jobs_ids, job_count = get_jobs_for_run(repo_full_name, run['id'], github_token)  # Get job IDs and count
     jobs_ids, job_details, job_count = get_jobs_for_run(repo_full_name, run['id'], github_token)
 
-    ### NEWLY ADDED CODE ##############################################################
+
     # You may get multiple frameworks; decide how to handle this case
     determined_framework = test_frameworks[0] if test_frameworks else "unknown"  # Default or handle appropriately
     cumulative_test_results = {'passed': 0, 'failed': 0, 'skipped': 0, 'total': 0}
     
-    # Proceed with existing logic, including log fetching and parsing
-    build_log = get_github_actions_log(repo_full_name, run['id'], github_token)
-    
+    # set to true to fetch logs and parse test results
+    if(False):
+        # Proceed with existing logic, including log fetching and parsing
+        build_log = get_github_actions_log(repo_full_name, run['id'], github_token)
+        
 
-    try:
-        with zipfile.ZipFile(io.BytesIO(build_log), 'r') as zip_ref:
-            for file_info in zip_ref.infolist():
-                if file_info.filename.endswith('.txt'):
-                    with zip_ref.open(file_info) as log_file:
-                        for line in log_file:
-                            log_content = line.decode('utf-8').strip()  # Process line-by-line
-                            if log_content:
-                                test_results = parse_test_results(determined_framework, log_content, build_language, framework_regex)
-                                cumulative_test_results['passed'] += test_results['passed']
-                                cumulative_test_results['failed'] += test_results['failed']
-                                cumulative_test_results['skipped'] += test_results['skipped']
-                                cumulative_test_results['total'] += test_results['total']
-                                print(f"Parsed test results from {file_info.filename}: {test_results}")
-    except zipfile.BadZipFile:
-        print(f"Failed to unzip log file for build {run['id']}")
-    ### END OF NEWLY ADDED CODE #######################################################
-    
+        try:
+            with zipfile.ZipFile(io.BytesIO(build_log), 'r') as zip_ref:
+                for file_info in zip_ref.infolist():
+                    if file_info.filename.endswith('.txt'):
+                        with zip_ref.open(file_info) as log_file:
+                            for line in log_file:
+                                log_content = line.decode('utf-8').strip()  # Process line-by-line
+                                if log_content:
+                                    test_results = parse_test_results(determined_framework, log_content, build_language, framework_regex)
+                                    cumulative_test_results['passed'] += test_results['passed']
+                                    cumulative_test_results['failed'] += test_results['failed']
+                                    cumulative_test_results['skipped'] += test_results['skipped']
+                                    cumulative_test_results['total'] += test_results['total']
+                                    print(f"Parsed test results from {file_info.filename}: {test_results}")
+        except zipfile.BadZipFile:
+            print(f"Failed to unzip log file for build {run['id']}")
+        
     # Check if this build is PR-related
     pr_details = fetch_pull_request_details(repo_full_name, commit_sha, github_token)
 
