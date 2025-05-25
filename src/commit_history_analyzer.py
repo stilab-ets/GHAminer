@@ -6,6 +6,24 @@ from file_indicators import is_production_file , is_test_file
 import subprocess
 import json
 import shutil
+import platform
+
+
+
+def get_scc_path():
+    system = platform.system()
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    print(system)
+
+    if system == "Windows":
+        return os.path.join(script_dir, "scc.exe")
+    elif system == "Darwin":
+        return os.path.join(script_dir, "scc_mac")
+    elif system == "Linux":
+        return os.path.join(script_dir, "scc_linux")
+    else:
+        raise RuntimeError(f"Unsupported platform: {system}")
+
 
 
 def clone_repo_locally(repo_url, base_path):
@@ -80,7 +98,7 @@ def calculate_sloc_and_test_lines(local_repo_path, commit_sha=None, timestamp=No
     import json
     from datetime import datetime
 
-    SCC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scc.exe")
+    SCC_PATH = get_scc_path()
     
     # Ensure repository path exists
     if not os.path.exists(local_repo_path):
