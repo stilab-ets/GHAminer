@@ -307,7 +307,7 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex):
         logging.info(f"Deleted temporary repository: {local_repo_path}")
 
     time.sleep(15)  # Prevent token exhaustion
-    unique_contributors.clear()
+    #unique_contributors.clear()
 
 
 
