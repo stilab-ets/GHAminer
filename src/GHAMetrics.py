@@ -374,8 +374,9 @@ def compile_build_info(run, repo_full_name, commit_data, sloc_initial, test_line
         for job in non_skipped_jobs
     )
 
-    head_commit_data = run.get('head_commit', {})
+    head_commit_data = run.get('head_commit') or {}
     first_commit_created_at = head_commit_data.get('timestamp', "N/A")
+
 
     # Compile the build information dictionary
     build_info = {
