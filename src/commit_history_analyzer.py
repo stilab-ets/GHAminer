@@ -40,7 +40,7 @@ def clone_repo_locally(repo_url, base_path):
     local_repo_path = os.path.join(tmp_dir, repo_name)  # Unique folder for each repo
     git_path = shutil.which("git") or r"C:\Program Files\Git\cmd\git.exe"  # Find git
 
-    print(f"📂 Cloning repo into: {local_repo_path}")
+    print(f"Cloning repo into: {local_repo_path}")
 
     if not os.path.exists(local_repo_path):
         result = subprocess.run([git_path, "clone", repo_url, local_repo_path], capture_output=True, text=True)
@@ -49,9 +49,9 @@ def clone_repo_locally(repo_url, base_path):
             logging.error(f"Error cloning repo: {result.stderr}")
             return None  # Return None if cloning fails
         else:
-            print(f"✅ Successfully cloned repo into {local_repo_path}")
+            print(f"Successfully cloned repo into {local_repo_path}")
     else:
-        print(f"🟡 Repository already exists at {local_repo_path}, ensuring all commits are available.")
+        print(f"Repository already exists at {local_repo_path}, ensuring all commits are available.")
 
     # Ensure full commit history is available
     try:

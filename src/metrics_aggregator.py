@@ -72,9 +72,9 @@ def save_builds_to_file(builds_info, output_csv):
             if os.stat(output_csv).st_size == 0:
                 writer.writeheader()  # Write header if file is empty
             writer.writerows(new_builds)
-        logging.info(f"✅ {len(new_builds)} new build(s) added to {output_csv}.")
+        logging.info(f"{len(new_builds)} new build(s) added to {output_csv}.")
     else:
-        logging.info(f"⚠️ No new builds to add, skipping file write.")
+        logging.info(f"No new builds to add, skipping file write.")
 
 
 
