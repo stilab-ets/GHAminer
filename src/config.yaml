@@ -1,0 +1,19 @@
+# Adds: gh_job_id, total_jobs, job_details, tests_ran
+fetch_job_details: true
+
+# Adds: tests_passed, tests_failed, tests_skipped, tests_total
+fetch_test_parsing_results: false
+
+# Adds: gh_files_added, gh_files_deleted, gh_files_modified, file_types,
+#       gh_lines_added, gh_lines_deleted, gh_src_churn,
+#       gh_tests_added, gh_tests_deleted, gh_test_churn,
+#       gh_src_files, gh_doc_files, gh_other_files,
+#       gh_commits_on_files_touched, dockerfile_changed, docker_compose_changed,
+#       git_num_committers, git_commits, gh_team_size_last_3_month
+fetch_commit_details: false
+
+# Adds: gh_pull_req_number, gh_is_pr, gh_num_pr_comments, git_merged_with, gh_description_complexity
+fetch_pull_request_details: true
+
+# Adds: gh_sloc, gh_test_lines_per_kloc
+fetch_sloc: false

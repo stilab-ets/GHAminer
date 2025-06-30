@@ -1,13 +1,11 @@
 import csv
-import logging
-
-
-import csv
 import pandas as pd
 import os
 import logging
 
-def save_builds_to_file(builds_info, output_csv):
+
+
+def save_builds_to_file_old(builds_info, output_csv):
     """Save only new builds information to a CSV file without duplicates."""
     if not builds_info:
         return  # Skip if no new builds
@@ -48,9 +46,41 @@ def save_builds_to_file(builds_info, output_csv):
 
 
 
+def save_builds_to_file(builds_info, output_csv):
+    """Save only new builds information to a CSV file without duplicates."""
+    if not builds_info:
+        return  # Skip if no new builds
+
+    # Dynamically determine the fieldnames from the first build in builds_info
+    fieldnames = list(builds_info[0].keys())
+
+    # **Load existing IDs from CSV to prevent duplicates**
+    existing_build_ids = set()
+    if os.path.exists(output_csv):
+        try:
+            existing_df = pd.read_csv(output_csv, usecols=['id_build'])
+            existing_build_ids = set(existing_df['id_build'].astype(str))
+        except Exception as e:
+            logging.error(f"Error reading existing build IDs from {output_csv}: {e}")
+
+    # **Filter out duplicate entries before writing**
+    new_builds = [build for build in builds_info if str(build['id_build']) not in existing_build_ids]
+
+    if new_builds:
+        with open(output_csv, mode='a', newline='', encoding='utf-8') as file:
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            if os.stat(output_csv).st_size == 0:
+                writer.writeheader()  # Write header if file is empty
+            writer.writerows(new_builds)
+        logging.info(f"✅ {len(new_builds)} new build(s) added to {output_csv}.")
+    else:
+        logging.info(f"⚠️ No new builds to add, skipping file write.")
+
+
+
 import os
 
-def save_head(output_csv):
+def save_head_old(output_csv):
     """Save builds information to a CSV file, avoiding duplicate headers."""
     fieldnames = [
         'repo', 'id_build', 'branch', 'commit_sha', 'languages', 'status', 'conclusion', 'workflow_event_trigger', 'issuer_name', 'workflow_id', 'created_at',
@@ -77,3 +107,4 @@ def save_head(output_csv):
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
     logging.info(f"CSV header with fetch duration saved to {output_csv}")
+
