@@ -16,9 +16,9 @@ def health_check():
 @app.post("/run")
 def run_ghaminer(payload: RunPayload):
     repo = "/".join(payload.repo_url.rstrip("/").split("/")[-2:])
-    print(f"[GHAminer1 API] Fetching data for repo: {repo}")
+    print(f"[GHAminer API] Fetching data for repo: {repo}")
 
-    ghametrics_path = Path(__file__).resolve().parent / "GHAMetrics.py"
+    ghametrics_path = Path(__file__).resolve().parent.parent / "src" / "GHAMetrics.py"
 
     if not ghametrics_path.exists():
         raise HTTPException(
@@ -48,7 +48,7 @@ def run_ghaminer(payload: RunPayload):
         raise HTTPException(
             status_code=500,
             detail={
-                "error": "GHAminer1 execution failed",
+                "error": "GHAminer execution failed",
                 "repo": repo,
                 "stderr": e.stderr.strip()
             }
