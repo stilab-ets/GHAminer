@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import subprocess
-import os
+from pathlib import Path
 
 app = FastAPI()
 
@@ -14,15 +14,22 @@ def health_check():
     return {"status": "ok"}
 
 @app.post("/run")
-@app.post("/run")
 def run_ghaminer(payload: RunPayload):
-    repo = payload.repo_url.split("/")[-2] + "/" + payload.repo_url.split("/")[-1]
-    print(f"[GHAminer1 API] Fetching data for repo: {repo}")  # 👈 add this line
+    repo = "/".join(payload.repo_url.rstrip("/").split("/")[-2:])
+    print(f"[GHAminer1 API] Fetching data for repo: {repo}")
+
+    ghametrics_path = Path(__file__).resolve().parent / "GHAMetrics.py"
+
+    if not ghametrics_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"GHAMetrics.py not found at: {ghametrics_path}"
+        )
 
     try:
         result = subprocess.run(
             [
-                "python", "GHAMetrics.py",
+                "python3", str(ghametrics_path),
                 "--token", payload.token,
                 "--single-project", payload.repo_url
             ],
