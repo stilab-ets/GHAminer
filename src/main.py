@@ -2,8 +2,17 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import subprocess
 from pathlib import Path
-
+from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
+
+# Add this after app instantiation
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Use ["http://localhost:3000"] for stricter dev setup
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class RunPayload(BaseModel):
     repo_url: str
