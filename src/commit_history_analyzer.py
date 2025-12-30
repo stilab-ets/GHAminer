@@ -571,6 +571,19 @@ def get_commit_count_until_date(local_repo_path, run_date):
 
     return commit_count
 
+def get_commit_count_until_commit(local_repo_path, commit_sha):
+    try:
+        result = subprocess.run(
+            [
+                "git", "-C", local_repo_path,
+                "rev-list", "--count", commit_sha
+            ],
+            capture_output=True, text=True, check=True
+        )
+        return int(result.stdout.strip())
+    except Exception as e:
+        logging.error(f"Error fetching commit count for {commit_sha}: {e}")
+        return 0
 
 
 # gets commits details from a last end date till and untill date
@@ -647,7 +660,9 @@ def get_commit_data_local(commit_sha, local_repo_path, run_date, run_plus_1_date
     commits_on_files_touched_count = count_commits_on_files_last_3_months(local_repo_path, commit_sha)
     committers_3_months = get_unique_committers_3_months(local_repo_path, run_date)
     unique_committers = get_unique_committers(local_repo_path, run_date=run_date)
-    commit_count = get_commit_count_until_date(local_repo_path, run_date)
+    #commit_count = get_commit_count_until_date(local_repo_path, run_date)
+    commit_count = get_commit_count_until_commit(local_repo_path, commit_sha)
+
 
     # **Return aggregated commit data**
     return {

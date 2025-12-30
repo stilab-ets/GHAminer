@@ -1,19 +1,127 @@
-# Adds: gh_job_id, total_jobs, job_details, tests_ran
+# ============================================================================
+# GHAminer Configuration File
+# ============================================================================
+# This file controls which metrics are collected during data extraction.
+# Set options to 'true' to enable or 'false' to disable specific metric groups.
+# By default, all options are set to 'true' to collect the full set of metrics.
+# 
+# Disabling certain options can significantly reduce API calls and processing
+# time, which is useful when you only need specific metrics.
+# ============================================================================
+
+
+# ----------------------------------------------------------------------------
+# WORKFLOW FILTERING
+# ----------------------------------------------------------------------------
+# Specify which workflows to analyze. By default, all workflows are processed.
+#
+# workflow_ids: List of specific workflow IDs to process.
+#   - If empty ([]) or not specified: ALL workflows in the repository are processed.
+#   - If populated: Only the specified workflow IDs will be analyzed.
+#
+# To find workflow IDs, you can:
+#   1. Use the GitHub API: GET /repos/{owner}/{repo}/actions/workflows
+#   2. Check the workflow run URL: https://github.com/{owner}/{repo}/actions/runs/{run_id}
+#      The workflow_id is visible in the API response or workflow details.
+#
+# Example with specific workflows:
+#   workflow_ids:
+#     - 12345678
+#     - 87654321
+#
+# Example to process all workflows (default):
+#   workflow_ids: []
+#
+workflow_ids: [9020027]
+
+
+# ----------------------------------------------------------------------------
+# JOB DETAILS
+# ----------------------------------------------------------------------------
+# When enabled, fetches detailed information about each job in the workflow run.
+# This includes job names, step details, start/end times, and durations.
+#
+# Columns added when enabled:
+#   - gh_job_id          : List of job IDs in the workflow run
+#   - total_jobs         : Total number of jobs in the workflow run
+#   - job_details        : JSON structure with job/step names, times, and results
+#   - tests_ran          : Boolean indicating if tests were executed (based on job/step names)
+#
 fetch_job_details: true
 
-# Adds: tests_passed, tests_failed, tests_skipped, tests_total
+
+# ----------------------------------------------------------------------------
+# TEST PARSING RESULTS
+# ----------------------------------------------------------------------------
+# When enabled, downloads and parses build logs to extract test results.
+# Supports multiple test frameworks (pytest, JUnit, Jest, RSpec, etc.)
+# Note: This can be slow as it requires downloading and parsing log files.
+#
+# Columns added when enabled:
+#   - tests_passed       : Number of tests that passed
+#   - tests_failed       : Number of tests that failed
+#   - tests_skipped      : Number of tests that were skipped
+#   - tests_total        : Total number of tests executed
+#
 fetch_test_parsing_results: false
 
-# Adds: gh_files_added, gh_files_deleted, gh_files_modified, file_types,
-#       gh_lines_added, gh_lines_deleted, gh_src_churn,
-#       gh_tests_added, gh_tests_deleted, gh_test_churn,
-#       gh_src_files, gh_doc_files, gh_other_files,
-#       gh_commits_on_files_touched, dockerfile_changed, docker_compose_changed,
-#       git_num_committers, git_commits, gh_team_size_last_3_month
-fetch_commit_details: false
 
-# Adds: gh_pull_req_number, gh_is_pr, gh_num_pr_comments, git_merged_with, gh_description_complexity
+# ----------------------------------------------------------------------------
+# COMMIT DETAILS
+# ----------------------------------------------------------------------------
+# When enabled, analyzes the commits associated with each workflow run.
+# Clones the repository locally to extract detailed commit information.
+# This provides code churn metrics and contributor statistics.
+#
+# Columns added when enabled:
+#   - gh_files_added             : Number of files added by the commits
+#   - gh_files_deleted           : Number of files deleted by the commits
+#   - gh_files_modified          : Number of files modified by the commits
+#   - file_types                 : List of file extensions changed (e.g., [".py", ".js"])
+#   - gh_lines_added             : Total lines of code added
+#   - gh_lines_deleted           : Total lines of code deleted
+#   - gh_src_churn               : Total source code churn (lines added + deleted)
+#   - gh_tests_added             : Lines of test code added
+#   - gh_tests_deleted           : Lines of test code deleted
+#   - gh_test_churn              : Total test code churn (test lines added + deleted)
+#   - gh_src_files               : Number of source code files changed
+#   - gh_doc_files               : Number of documentation files changed
+#   - gh_other_files             : Number of other files changed
+#   - gh_commits_on_files_touched: Number of commits on touched files in last 3 months
+#   - dockerfile_changed         : Number of Dockerfile changes in the commits
+#   - docker_compose_changed     : Number of docker-compose file changes
+#   - git_num_committers         : Total unique committers since project start
+#   - git_commits                : Total commits in the repository up to this run
+#   - gh_team_size_last_3_month  : Unique committers in the last 3 months
+#
+fetch_commit_details: true
+
+
+# ----------------------------------------------------------------------------
+# PULL REQUEST DETAILS
+# ----------------------------------------------------------------------------
+# When enabled, fetches pull request information if the workflow run is
+# associated with a PR. Useful for analyzing PR-triggered builds.
+#
+# Columns added when enabled:
+#   - gh_pull_req_number      : Pull request number (0 if not a PR)
+#   - gh_is_pr                : Boolean indicating if build is PR-related
+#   - gh_num_pr_comments      : Number of comments on the PR
+#   - git_merged_with         : SHA of the merge commit (if merged)
+#   - gh_description_complexity: Word count of PR title + description
+#
 fetch_pull_request_details: true
 
-# Adds: gh_sloc, gh_test_lines_per_kloc
-fetch_sloc: false
+
+# ----------------------------------------------------------------------------
+# SOURCE LINES OF CODE (SLOC)
+# ----------------------------------------------------------------------------
+# When enabled, calculates source lines of code and test density metrics.
+# Uses the 'scc' tool to count lines at the specific commit.
+# Note: This requires checking out each commit, which can be slow.
+#
+# Columns added when enabled:
+#   - gh_sloc                 : Total source lines of code in the repository
+#   - gh_test_lines_per_kloc  : Test density (test lines per 1,000 SLOC)
+#
+fetch_sloc: true

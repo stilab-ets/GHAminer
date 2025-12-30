@@ -53,30 +53,89 @@ def get_repository_languages(repo_full_name, token):
 
 
 
-def get_workflow_ids(repo_full_name, token):
+def get_workflow_ids(repo_full_name, token, specific_workflow_ids=None):
+    """
+    Fetch workflow IDs for a given repository.
+    
+    Args:
+        repo_full_name (str): The full repository name (owner/repo).
+        token (str): GitHub API token.
+        specific_workflow_ids (list, optional): List of specific workflow IDs to filter.
+            - If None or empty list: returns ALL workflow IDs in the repository.
+            - If non-empty list: returns only the specified workflow IDs (validated against existing workflows).
+    
+    Returns:
+        list: List of workflow IDs to process.
+    """
     url = f"https://api.github.com/repos/{repo_full_name}/actions/workflows"
     workflows_response = get_request(url, token)
-    build_workflow_ids = []
-    if workflows_response and 'workflows' in workflows_response:
-        for workflow in workflows_response['workflows']:
-            # Assuming workflows defined in build.yml have 'build' in their name or in the path as build.yml
-            if '/build.yml' in workflow['path'].lower():
-                build_workflow_ids.append(workflow['id'])
-    return build_workflow_ids
+    
+    if not workflows_response or 'workflows' not in workflows_response:
+        return []
+    
+    # Get all available workflow IDs from the repository
+    all_workflow_ids = [workflow['id'] for workflow in workflows_response['workflows']]
+    
+    # If specific_workflow_ids is None or empty, return all workflows
+    if not specific_workflow_ids:
+        logging.info(f"No specific workflows configured. Processing all {len(all_workflow_ids)} workflows.")
+        return all_workflow_ids
+    
+    # Filter to only include specified workflow IDs that exist in the repository
+    valid_workflow_ids = [wid for wid in specific_workflow_ids if wid in all_workflow_ids]
+    
+    # Log warnings for any specified IDs that don't exist
+    invalid_ids = [wid for wid in specific_workflow_ids if wid not in all_workflow_ids]
+    if invalid_ids:
+        logging.warning(f"The following workflow IDs were not found in {repo_full_name}: {invalid_ids}")
+    
+    logging.info(f"Processing {len(valid_workflow_ids)} specified workflows out of {len(all_workflow_ids)} available.")
+    return valid_workflow_ids
 
+
+def get_workflow_ids_by_name(repo_full_name, token, workflow_names=None):
+    """
+    Fetch workflow IDs by workflow file names or paths.
+    
+    Args:
+        repo_full_name (str): The full repository name (owner/repo).
+        token (str): GitHub API token.
+        workflow_names (list, optional): List of workflow file names to filter (e.g., ['build.yml', 'test.yml']).
+            - If None or empty list: returns ALL workflow IDs in the repository.
+            - If non-empty list: returns only workflows matching the specified names.
+    
+    Returns:
+        list: List of workflow IDs to process.
+    """
+    url = f"https://api.github.com/repos/{repo_full_name}/actions/workflows"
+    workflows_response = get_request(url, token)
+    
+    if not workflows_response or 'workflows' not in workflows_response:
+        return []
+    
+    # If workflow_names is None or empty, return all workflows
+    if not workflow_names:
+        return [workflow['id'] for workflow in workflows_response['workflows']]
+    
+    # Filter workflows by name/path
+    matched_workflow_ids = []
+    for workflow in workflows_response['workflows']:
+        workflow_path = workflow.get('path', '').lower()
+        workflow_file = workflow_path.split('/')[-1] if workflow_path else ''
+        
+        for name in workflow_names:
+            name_lower = name.lower()
+            # Match by exact file name or partial path match
+            if name_lower == workflow_file or name_lower in workflow_path:
+                matched_workflow_ids.append(workflow['id'])
+                break
+    
+    return matched_workflow_ids
 
 
 def get_workflow_all_ids(repo_full_name, token):
     """
     Fetch all workflow IDs for a given repository.
+    This is a convenience wrapper around get_workflow_ids with no filtering.
     """
-    url = f"https://api.github.com/repos/{repo_full_name}/actions/workflows"
-    workflows_response = get_request(url, token)
-    workflow_ids = []
-    
-    if workflows_response and 'workflows' in workflows_response:
-        for workflow in workflows_response['workflows']:
-            # Collect all workflow IDs, regardless of their names or paths
-            workflow_ids.append(workflow['id'])
-    
-    return workflow_ids
+    return get_workflow_ids(repo_full_name, token, specific_workflow_ids=None)
