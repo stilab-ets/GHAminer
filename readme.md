@@ -276,4 +276,19 @@ Distributed under the MIT License. See `LICENSE.md` for more information.
 ## Contact:
 Jasem Khelifi - jasemkhelifi[at]gmail.com
 
+## How to cite?
+
+Please, use the following bibtex entry:
+
+```tex
+@inproceedings{khelifi2025ghaminer,
+  title={GHAminer: An open source tool to extract GitHub actions build metrics},
+  author={Khelifi, Jasem and Benzina, Yacine and Chouchen, Moataz and Ouni, Ali and Sayagh, Mohammed and Bouktif, Salah},
+  booktitle={IEEE International Conference on Software Analysis, Evolution and Reengineering (SANER)},
+  pages={834--838},
+  year={2025},
+  organization={IEEE}
+}
+```
+
 
